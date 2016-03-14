@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8 lt-ie7"> <![endif]-->
+<!--[if IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8"> <![endif]-->
+<!--[if IE 8]> <html class="lt-ie10 lt-ie9"> <![endif]-->
+<!--[if IE 9]> <html class="lt-ie10"> <![endif]-->
+<!--[if gt IE 9]><!--> <html> <!--<![endif]-->
+<head>
+    <meta content="width=980" id="viewport" name="viewport">
+    <title>BotanJS - vim</title>
+
+    <meta name="description" content="Yet another vim implementation attempt with textarea">
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+
+    <link rel="stylesheet" type="text/css" href="http://s.botanjs.astropenguin.net/ocss/Astro.Penguin.Github">
+    <script src="http://s.botanjs.astropenguin.net/ojs/Astro.Penguin.Github"></script>
+
+    <link rel="stylesheet" type="text/css" href="/BotanJS-vim/vima.css" />
+    <script src="/BotanJS-vim/vima.js" ></script>
+
+    <script>window.onload=function(){BotanJS.import("Astro.Bootstrap").init();}</script>
+</head>
+<body>
+
+<div class="center">
+    <div class="left">
+        <h1> VimArea </h1>
+        <p> VimArea is a vim implementation over a textarea. There's a plenty of online Vim out there with different degree of impl and approach. </p>
+        <p> This one is none the other, the goal of this implementation is to minimize the footprint for creating additional iframe or divs. </p>
+        <h1> Demo </h1>
+        <div>
+            <textarea id="vim-area" class="vima" rows="20" cols="80"></textarea>
+        </div>
+        <h2> Javascript: </h2>
+        <div>
+            <pre>
+var d = BotanJS.import( "Dandelion" );
+var vimArea = d.id( "vim-area", true );
+vimArea.element.value = TestString;
+var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
+            </pre>
+        </div>
+        <h2> TODO </h2>
+        <ul>
+            <li> hjkl ( partial complete, in word wrap mode ) </li>
+            <li> -- INSERT -- </li>
+            <li> -- VISUAL -- </li>
+            <li> yank / paste </li>
+            <li> :Commands </li>
+        </ul>
+    </div>
+</div>
+
+<script>
+(function(){
+    var TestString =
+    "   Libero, sagittis vel, hendrerit accumsan, pulvinar consequat, tellus. Donec varius dictum nisl. Vestibulum suscipit enim ac nulla. Proin tincidunt. Proin sagittis. Curabitur auctor metus non mauris. Nunc condimentum nisl non augue. Donec leo urna, dignissim vitae, porttitor ut, iaculis sit amet, sem."
+
+    + "\n Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Suspendisse potenti. Quisque augue metus, hendrerit sit amet, commodo vel, scelerisque ut, ante. Praesent euismod euismod risus. Mauris ut metus sit amet mi cursus commodo. Morbi congue mauris ac sapien. Donec justo. Sed congue nunc vel mauris. Pellentesque vehicula orci id libero. In hac habitasse platea dictumst."
+
+    + "\n   Tincidunt viverra justo. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Sed eros ante, mattis ullamcorper, posuere quis, tempor vel, metus. Maecenas cursus cursus lacus."
+    + "\n"
+    + "\nSed risus magna, aliquam sed, suscipit sit amet, porttitor quis, odio."
+    + "\n"
+    + "\nSuspendisse cursus justo nec urna. Suspendisse potenti. In hac habitasse platea dictumst. Cras quis lacus. Vestibulum rhoncus congue lacus."
+    + "\nVivamus euismod, felis quis commodo viverra, dolor elit dictum ante, et mollis eros augue at est. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos.  Nulla lectus sem, tristique sed, semper in, hendrerit non, sem. Vivamus dignissim massa."
+
+    + "\nCommodo. Vestibulum enim felis, interdum non, sollicitudin in, posuere a, sem. Cras nibh."
+    + "\n"
+
+    + "\nSed facilisis ultrices dolor. Vestibulum pretium mauris sed turpis. Phasellus a pede id odio interdum elementum. Nam urna felis, sodales ut, luctus vel, condimentum vitae, est. Vestibulum ut augue."
+
+    + "\nVestibulum in elit at odio pellentesque volutpat. Nam nec tortor."
+
+    ;
+
+    var d = BotanJS.import( "Dandelion" );
+    var vimArea = d.id( "vim-area", true );
+    vimArea.element.value = TestString;
+
+    var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
+})();
+</script>
+</body>
+</html>
