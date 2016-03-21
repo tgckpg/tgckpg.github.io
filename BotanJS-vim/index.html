@@ -26,11 +26,12 @@
         <h1> VimArea </h1>
         <p> VimArea is a vim implementation over a textarea. There's a plenty of online Vim out there with different degree of impl and approach. </p>
         <p> This one is none the other, the goal of this implementation is to minimize the footprint for creating additional iframe or divs. </p>
-        <h1> Demo </h1>
+        <p> This is not a traditional vim ( yet ). I recommend to use wasavi if you can. It is a more mature project. Even if the project is finisished, it would not provide the functionality like wasavi does ( mostly because of the limitation of a textarea ). </p>
+        <h2> Demo </h2>
         <div>
-            <textarea id="vim-area" class="vima" rows="20" cols="80"></textarea>
+            <textarea id="vim-area" class="vima" rows="20" cols="80" spellcheck="false"></textarea>
         </div>
-        <h2> Javascript: </h2>
+        <h3> Javascript: </h3>
         <div>
             <pre>
 var d = BotanJS.import( "Dandelion" );
@@ -39,27 +40,20 @@ vimArea.element.value = TestString;
 var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
             </pre>
         </div>
-        <h2> Source Code </h2>
+        <h3> Source Code </h3>
         <div>
         <ol>
-            <li> This page: <a href="/BotanJS-vim/vima.css">js</a>, <a href="/BotanJS-vim/vima.js" >css</a> </li>
-            <li> BotanJS API ( dev, unstable ):
+            <li> This page: <a href="/BotanJS-vim/vima.js">js</a>, <a href="/BotanJS-vim/vima.css" >css</a> </li>
+            <li> BotanJS API ( dev, VERY unstable. May contain syntax error ):
+            <br />
             js ( <a href="http://s.botanjs.astropenguin.net/rjs/Components.Vim.VimArea" target="_blank">raw</a>,
             <a href="http://s.botanjs.astropenguin.net/ojs/Components.Vim.VimArea" target="_blank">compressed</a> )
             css ( <a href="http://s.botanjs.astropenguin.net/rcss/Components.Vim.VimArea" target="_blank">raw</a>,
             <a href="http://s.botanjs.astropenguin.net/ocss/Components.Vim.VimArea" target="_blank">compressed</a> )
             </li>
-            <li> <a href="https://github.com/tgckpg/BotanJS-vim">Github</a> </li>
+            <li> Project page: <a href="https://github.com/tgckpg/BotanJS-vim">Github</a> </li>
         </ol>
         </div>
-        <h2> TODO </h2>
-        <ul>
-            <li> hjkl ( partial complete, in word wrap mode ) </li>
-            <li> -- INSERT -- </li>
-            <li> -- VISUAL -- </li>
-            <li> yank / paste </li>
-            <li> :Commands </li>
-        </ul>
     </div>
 </div>
 
