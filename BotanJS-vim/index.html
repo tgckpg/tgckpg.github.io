@@ -29,29 +29,35 @@
         <p> This is not a traditional vim ( yet ). I recommend to use wasavi if you can. It is a more mature project. Even if this project is finished, it would not provide the functionality like wasavi does ( mostly because of the limitation of a textarea ). </p>
         <h2> Demo </h2>
         <div>
-        <ol>
-			<li> This project is developed under firefox 45.0.1 </li>
-			<li> Tested in Microsoft Edge </li>
-			<li> Google Chrome? Nope, would not test. You should use wasavi tho. </li>
-		</ol>
+            <img src="/BotanJS-vim/gifs/vim-demo.gif" width="1000"></img>
+            <ol>
+                <li> This project is developed under firefox 45.0.1 </li>
+                <li> Tested in Microsoft Edge </li>
+                <li> Google Chrome? Nope, would not test. You should use wasavi tho. </li>
+            </ol>
+        </div>
+        <div>
+            <h3> Typical setup </h3>
+            <pre>
+var vimArea = document.getElementById( "vim-area" );
+vimArea.value = TestString;
+var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
+            </pre>
         </div>
         <div>
             <textarea id="vim-area" class="vima" rows="25" cols="90" spellcheck="false"></textarea>
         </div>
         <div>
 			<h3> Experimental - Detect screen size </h3>
+            <pre>
+var vimArea = document.getElementById( "vim-area" );
+vimArea.value = TestString;
+var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea, true );
+            </pre>
+            <button id="vim-init"> Create Instance for below textarea </button>
         </div>
         <div>
             <textarea id="vim-area2" class="vima" rows="25" cols="90" spellcheck="false"></textarea>
-        </div>
-        <div> <button id="vim-init"> Create Instance for textarea above </button> </div>
-        <h3> Javascript: </h3>
-        <div>
-            <pre>
-var vimArea = document.getElementById( "vim-area" );
-vimArea.element.value = TestString;
-var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
-            </pre>
         </div>
         <h3> Source Code </h3>
         <div>
@@ -81,7 +87,7 @@ var VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
     window.VimArea = new ( BotanJS.import( "Components.Vim.VimArea" ) )( vimArea );
 
 	var vimArea2 = d.id( "vim-area2" );
-    vimArea2.value = "Since some textarea does not specify rows / cols\n\nI've made an experimental feature that automatically detects the screen size\nPlease file an issue if anything goes wrong with the rendering\n\nTo initialize with screen detection:\n\tnew VimArea( Element:TEXTAREA, DETECT_SCREEN_SIZE:Boolean );\n\nPress the button below to initialize a Vim instance.";
+    vimArea2.value = "Since some textarea does not specify rows / cols\n\nI've made an experimental feature that automatically detects the screen size\nPlease file an issue if anything goes wrong with the rendering\n\nTo initialize with screen detection:\n\tnew VimArea( Element:TEXTAREA, DETECT_SCREEN_SIZE:Boolean );\n\nPress the button above to initialize a Vim instance.";
 
     var vimInit = d.id( "vim-init", true );
 
