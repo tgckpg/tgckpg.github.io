@@ -1,0 +1,75 @@
+<!DOCTYPE html><!--[if lt IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8 lt-ie7"> <![endif]--><!--[if IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8"> <![endif]--><!--[if IE 8]> <html class="lt-ie10 lt-ie9"> <![endif]--><!--[if IE 9]> <html class="lt-ie10"> <![endif]--><!--[if gt IE 9]><!--> <html> <!--<![endif]--><head> <meta content="width=980" id="viewport" name="viewport"> <title>Penguin&#39;s lab</title> <meta name="description" content="This is were I put my project info"><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> <script> var _AstConf_ = {}, debugEnv = true; </script> <link rel="stylesheet" type="text/css" href="/assets/botanjs/c6b544977e47f4838de85b9a1c905053.c.css"> <script src="/assets/botanjs/7cc8e29cec0e8d9e3ddc3684099eba4e.c.js"></script> <script>window.onload=function(){BotanJS.import("Astro.Bootstrap").init();}</script></head><body> <div id="begin-wrapper" class="begin-wrapper"> <div id="main_background" class="no_transition_recursive flsf"></div> <!--header--><div id="horizon" class="horizon"></div><!-- horizon line --><div id="header" class="home"> <header class="main-column"> <div id="menu" class="compx"><a id="menu_home" href="/">Home</a>&nbsp;<a id="menu_project" href="/SyntaxHighlighter/" data-active="1">SyntaxHighlighter</a>&nbsp;<a id="menu_blog" href="http://blog.astropenguin.net">Blog</a> </div> </header></div><!-- end header --> <div id="mbody" class="mbody main-column"> <h1> BotanJs-SyntaxHighlighter </h1><div class="panel desc"> This is a port from SyntaxHighlighter for BotanJs framework.</div><div> <h2> Links </h2> <div class="panel"> <a href="https://github.com/tgckpg/BotanJS">Project Home</a> | <a href="/BotanJS/docs/">Documentation</a> </div> <h2> Demo </h2> <div class="panel">This is an example Bootstrapping SyntaxHighlighter dynamically if the class is present <pre class="brush: jscript">
+(function(){
+	var ns = __namespace( "Astro.Bootstrap" );
+	var debug = __import( "System.Debug" );
+	
+	// __import( "Dandelion.CSSReset" ); CSS_RESERVATION
+	// __import( "Dandelion.CSSAnimations" ); CSS_RESERVATION
+
+	var infs = [];
+
+	// Init Helper, body onload
+	var regInitFunc = function( f ) { infs[ infs.length ] = f; };
+
+	var inited = false;
+	var consoleExists = false;
+	var SyntaxHighlighterExists = false;
+	var CConsole = "Components.Console";
+
+	var SyntaxHighlighter = "Libraries.SyntaxHighlighter";
+
+	var init = function()
+	{
+		if( inited ) return;
+		inited = true;
+
+		if( consoleExists )
+		{
+			// The + is to prevent resolver resolving this class
+			// since this is optional
+			new ( __import( CConsole ) );
+		}
+
+		var l = infs.length;
+		debug.Info( "[Astro.Blog] init(" + l + ")" );
+		for( var i = 0; i < l; i ++ )
+		{
+			infs[i]();
+		}
+
+		if( SyntaxHighlighterExists )
+		{
+			debug.Info( "[SyntaxHighlighter] Initializing" );
+
+			/** @type {Libraries.SyntaxHighlighter} */
+			var synt = __import( SyntaxHighlighter );
+			synt.defaults["toolbar"] = false;
+			synt.defaults["quick-code"] = false;
+			synt.highlight();
+		}
+	};
+
+	/*{{{ Class Catching */
+	BotanJS.addEventListener( "NS_EXPORT", function( e )
+	{
+		switch( e.data.name )
+		{
+			case CConsole:
+				consoleExists = true;
+			break;
+			case SyntaxHighlighter:
+				SyntaxHighlighterExists = true;
+			break;
+		}
+	});
+
+	try {
+		__import( CConsole );
+		consoleExists = true;
+	} catch( e ) { };
+	/* End Console Catching }}}*/
+
+	ns[ NS_EXPORT ]( EX_FUNC, "init", init );
+	ns[ NS_EXPORT ]( EX_FUNC, "regInit", regInitFunc )
+})();
+        </pre> </div></div> <div class="clearfix"></div> </div></div><footer> <div id="fhorizon" class="horizon"></div> <div class="footer_bg main-column"> <div class="f_links"> <!-- Powered by --> <div class="flink_section"> <span>powered by</span> <a target="_blank" href="Github">Github</a> </div> <!-- About --> <div class="flink_section"> <span>about</span> <a target="_blank" href="http://blog.astropenguin.net/about">Me</a> </div> </div> <div class="copysign flsf"> CopyLeft Astropenguin 2016 </div> </div></footer> </body></html>

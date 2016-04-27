@@ -1,0 +1,31 @@
+<!DOCTYPE html><!--[if lt IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8 lt-ie7"> <![endif]--><!--[if IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8"> <![endif]--><!--[if IE 8]> <html class="lt-ie10 lt-ie9"> <![endif]--><!--[if IE 9]> <html class="lt-ie10"> <![endif]--><!--[if gt IE 9]><!--> <html> <!--<![endif]--><head> <meta content="width=980" id="viewport" name="viewport"> <title>VimArea - Penguin&#39;s lab</title> <meta name="description" content="This is were I put my project info"><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> <script> var _AstConf_ = {}, debugEnv = true; </script> <link rel="stylesheet" type="text/css" href="/assets/botanjs/cdeeb013b7f6d5c15f3108a42b3e663e.c.css"> <script src="/assets/botanjs/d2d5313503d920cb3b924bed910798bf.c.js"></script> <script>window.onload=function(){BotanJS.import("Astro.Bootstrap").init();}</script></head><body> <div id="begin-wrapper" class="begin-wrapper"> <div id="main_background" class="no_transition_recursive flsf"></div> <!--header--><div id="horizon" class="horizon"></div><!-- horizon line --><div id="header" class="home"> <header class="main-column"> <div id="menu" class="compx"><a id="menu_home" href="/">Home</a>&nbsp;<a id="menu_project" href="/VimArea/" data-active="1">VimArea</a>&nbsp;<a id="menu_blog" href="http://blog.astropenguin.net">Blog</a> </div> </header></div><!-- end header --> <div id="mbody" class="mbody main-column"> <h1> VimArea - Demo </h1><div class="panel desc"> <h2> Keybinding Init </h2> <div class="panel"> <pre class="brush: jscript">
+(function(){
+    window.VimArea = BotanJS.import( "Components.Vim.VimArea" );
+
+    var d = BotanJS.import( "Dandelion" );
+    var vimArea = d.id( "vim-area" );
+
+	vimArea.value = "Try pressing F10 here.";
+
+	var f10Binding = function ( e )
+	{
+		e = e || window.event;
+		if ( e.keyCode ) code = e.keyCode;
+		else if ( e.which ) code = e.which;
+
+		if ( code == 121 ) // F10, change this value to any key you like
+		{
+			e.preventDefault();
+			var node = document.activeElement;
+			if( node.nodeName == "TEXTAREA" )
+			{
+				new VimArea( node, true );
+			}
+		}
+	};
+
+	if(document.addEventListener) document.addEventListener('keydown', f10Binding, false);
+	else if(document.attachEvent) document.attachEvent('onkeydown', f10Binding);
+	else document.onkeydown = f10Binding;
+})();
+        </pre> <textarea id="vim-area" class="vima" rows="25" cols="90" spellcheck="false"></textarea> </div><a href="/VimArea/docs/#keybinding-init">Back</a><script>(function(){ window.VimArea = BotanJS.import( "Components.Vim.VimArea" ); var d = BotanJS.import( "Dandelion" ); var vimArea = d.id( "vim-area" );vimArea.value = "Try pressing F10 here.";var f10Binding = function ( e ){e = e || window.event;if ( e.keyCode ) code = e.keyCode;else if ( e.which ) code = e.which;if ( code == 121 ){e.preventDefault();var node = document.activeElement;if( node.nodeName == "TEXTAREA" ){new VimArea( node, true );}}};if(document.addEventListener) document.addEventListener('keydown', f10Binding, false);else if(document.attachEvent) document.attachEvent('onkeydown', f10Binding);else document.onkeydown = f10Binding;})();</script></div> <div class="clearfix"></div> </div></div><footer> <div id="fhorizon" class="horizon"></div> <div class="footer_bg main-column"> <div class="f_links"> <!-- Powered by --> <div class="flink_section"> <span>powered by</span> <a target="_blank" href="Github">Github</a> </div> <!-- About --> <div class="flink_section"> <span>about</span> <a target="_blank" href="http://blog.astropenguin.net/about">Me</a> </div> </div> <div class="copysign flsf"> CopyLeft Astropenguin 2016 </div> </div></footer> </body></html>

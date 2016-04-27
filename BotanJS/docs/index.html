@@ -1,0 +1,18 @@
+<!DOCTYPE html><!--[if lt IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8 lt-ie7"> <![endif]--><!--[if IE 7]> <html class="lt-ie10 lt-ie9 lt-ie8"> <![endif]--><!--[if IE 8]> <html class="lt-ie10 lt-ie9"> <![endif]--><!--[if IE 9]> <html class="lt-ie10"> <![endif]--><!--[if gt IE 9]><!--> <html> <!--<![endif]--><head> <meta content="width=980" id="viewport" name="viewport"> <title>BotanJS - Penguin&#39;s lab</title> <meta name="description" content="This is were I put my project info"><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"> <script> var _AstConf_ = {}, debugEnv = true; </script> <link rel="stylesheet" type="text/css" href="/assets/botanjs/c6b544977e47f4838de85b9a1c905053.c.css"> <script src="/assets/botanjs/7cc8e29cec0e8d9e3ddc3684099eba4e.c.js"></script> <script>window.onload=function(){BotanJS.import("Astro.Bootstrap").init();}</script></head><body> <div id="begin-wrapper" class="begin-wrapper"> <div id="main_background" class="no_transition_recursive flsf"></div> <!--header--><div id="horizon" class="horizon"></div><!-- horizon line --><div id="header" class="home"> <header class="main-column"> <div id="menu" class="compx"><a id="menu_home" href="/">Home</a>&nbsp;<a id="menu_project" href="/BotanJS/" data-active="1">BotanJS</a>&nbsp;<a id="menu_blog" href="http://blog.astropenguin.net">Blog</a> </div> </header></div><!-- end header --> <div id="mbody" class="mbody main-column"> <h1> Documentation </h1><div class="panel desc"> <h2> Table of Contents </h2> <ol> <ol><a href="#writing-codes">Writing codes in BotanJs</a><li> <a href="#scope">Scoping</a> </li><li> <a href="#namespaces">Namespace</a> </li><li> <a href="#example-class">Example</a> </li></ol> </ol></div><div><h2 id="writing-codes"> Writing Codes in BotanJs </h2><div class="panel"><h3 id="scope"> Scoping </h3><div class="panel"><p> It is recommended to enclosed each class with <span class="code"> (function(){ / CODES / })(); </span> ( but NOT A MUST ) to ensure your variables and function would not collide with other predefined variables or other classes. </p><p> However, you can achive a higher compression ratio without enclosing. It is your choice to ensure the variable names would not collide each other ( such as adding prefixes ). </p></div><h3 id="namespaces"> Namespaces </h3><div class="panel">The Namespace MUST be defined for each beginning of the class via the predefined function __namespace. This tells the compiler to associate this file to the defined namespace.</div><h3 id="example-class"> Example </h3><div class="panel"><pre class="brush: jscript">// Path/To/The/Namespace/MyExportedClassName.js
+(function() {
+	var ns = __namespace( "Path.To.The.Namespace" );
+
+	// JSDoc is needed to prevent the closure compiler
+	// compressing exported methods and properties
+	/** @type {Path.To.Some.Other.Class} */
+	var OtherClass = __import( "Path.To.Some.Other.Class" );
+
+	// Enclosing also enables the private static scope
+	var MyPrivateStaticVar = "Private static variable";
+
+	var MyClass = function() { };
+	MyClass.prototype.MyFunction = function() { };
+
+	// This will export your class to Path.To.The.Namespace.MyExportedClassName
+	ns[ NS_EXPORT ]( EX_CLASS, "MyExportedClassName", MyClass );
+})();</pre></div></div></div> <div class="clearfix"></div> </div></div><footer> <div id="fhorizon" class="horizon"></div> <div class="footer_bg main-column"> <div class="f_links"> <!-- Powered by --> <div class="flink_section"> <span>powered by</span> <a target="_blank" href="Github">Github</a> </div> <!-- About --> <div class="flink_section"> <span>about</span> <a target="_blank" href="http://blog.astropenguin.net/about">Me</a> </div> </div> <div class="copysign flsf"> CopyLeft Astropenguin 2016 </div> </div></footer> </body></html>
