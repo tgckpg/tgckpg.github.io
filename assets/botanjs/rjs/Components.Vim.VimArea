@@ -1536,7 +1536,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		"INSERT": "-- INSERT --"
 		, "REPLACE": "-- REPLACE --"
 		, "MORE": "-- MORE --"
-		, "VISUAL": "-- VISUAL  --"
+		, "VISUAL": "-- VISUAL --"
 		, "VISLINE": "-- VISUAL LINE --"
 		, "REGISTERS": "--- Registers ---"
 		, "WRITE": "\"%1\" %2L, %3C written"
@@ -3911,7 +3911,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		}
 		this.__msg = "";
 		this.__rec( "", true );
-		this.__cursor.moveX( -1 );
+		this.__cursor.moveX( -1, false, false, true );
+		this.__cursor.fixTab();
 	};
 
 	INSERT.prototype.__rec = function( c, newRec )
@@ -3980,13 +3981,15 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 				this.__contentUndo = feeder.content.substr( f, 1 ) + this.__contentUndo;
 			}
 
+			cur.moveX(
+				feeder.content[f] == "\t" ? -feeder.firstBuffer.tabWidth : -1
+				, true, true, true );
+
 			feeder.content =
 				feeder.content.substring( 0, f )
 				+ feeder.content.substring( f + 1 );
 
 			feeder.pan();
-
-			cur.moveX( -1, true, true );
 
 			if( 0 < this.__insertLen ) this.__insertLen --;
 			this.__punch --;
@@ -4048,7 +4051,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		{
 			this.__realizeIndent();
 			feeder.pan();
-			cur.moveX( inputChar == "\t" ? feeder.firstBuffer.tabWidth : 1, false, true );
+			cur.moveX( inputChar == "\t" ? feeder.firstBuffer.tabWidth : 1, false, true, true );
 		}
 
 		feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
@@ -4113,7 +4116,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 			feeder.softReset();
 			feeder.pan();
-			cur.moveX( i * feeder.firstBuffer.tabWidth, false, true );
+			cur.moveX( i, false, true );
 
 			var a = [];
 			a[ IN_START ] = f;
@@ -4716,7 +4719,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			f();
 			// Offset correction after REDO / UNDO
 			cur.moveTo( recStart );
-			cur.lineStart();
+			cur.lineStart( true );
 		} );
 
 		cur.moveTo( recStart );
@@ -5667,13 +5670,13 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 				if( cur.aPos == startLine.aPos )
 				{
-					cur.moveTo( r.open, true );
+					cur.moveTo( r.open, true, false, true );
 					this.__reset( cur );
 					startLine = this.__startLine;
 				}
 
 				cur.unsuppressEvent();
-				cur.moveTo( r.close, true );
+				cur.moveTo( r.close, true, false, true );
 			}
 
 			var currAp = cur.aPos;
@@ -5909,7 +5912,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	Cursor.prototype.Vim;
 
 	// Move to an absolute position
-	Cursor.prototype.moveTo = function( aPos, phantomSpace )
+	Cursor.prototype.moveTo = function( aPos, phantomSpace, skipTabs )
 	{
 		var content = this.feeder.content;
 		var pline = this.getLine();
@@ -5939,19 +5942,18 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		var jumpX = aPos < lineStart ? lineStart - aPos : aPos - lineStart;
 
 		jumpX += Math.ceil( jumpX / pline.cols ) - 1;
-		jumpX += occurence( content.substring( lineStart + 1, aPos ), "\t" ) * ( pline.tabWidth - 1 );
 
 		if( jumpY ) this.moveY( jumpY );
 
 		// This is needed because first line does not contain the first "\n" character
 		if( 0 < this.getLine().lineNum && lineStart <= aPos ) jumpX --;
 
-		this.moveX( - Number.MAX_VALUE );
-		this.moveX( jumpX, false, phantomSpace );
+		this.moveX( - Number.MAX_VALUE, false, false, true );
+		this.moveX( jumpX, false, phantomSpace, skipTabs );
 	};
 
 	// 0 will be treated as default ( 1 )
-	Cursor.prototype.moveX = function( d, penetrate, phantomSpace )
+	Cursor.prototype.moveX = function( d, penetrate, phantomSpace, skipTab )
 	{
 		var x = this.pX;
 		var updatePx = Boolean( d );
@@ -5983,6 +5985,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 		/** @type {Components.Vim.LineBuffer} */
 		var line = this.getLine();
+		var tabStep = line.tabWidth - 1;
+		var rline = this.rawLine;
 		var content = line.visualLines.join( "\n" );
 		var cLen = content.length;
 
@@ -5996,8 +6000,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		{
 			// Begin check if this line contains phantomSpace
 			// hasPhantomSpace = 0 < ( rawLine.displayLength ) % cols
-			var rline = this.rawLine;
-			hasPhantomSpace = 0 < ( rline.length + occurence( rline, "\t" ) * ( line.tabWidth - 1 ) ) % line.cols;
+			hasPhantomSpace = 0 < ( rline.length + occurence( rline, "\t" ) * tabStep ) % line.cols;
 
 			if( hasPhantomSpace )
 			{
@@ -6006,6 +6009,81 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			else
 			{
 				lineEnd = phantomSpace ? cLen : cLen - 1;
+			}
+		}
+
+		// Hacky tab compensations
+		if( skipTab )
+		{
+			// Handles INSERT on first tab char
+			if( penetrate && 0 < d )
+			{
+				if( ( content.length - 1 ) <= x )
+				{
+					this.moveY( 1 );
+					this.X = 0;
+					this.updatePosition();
+					return;
+				}
+			}
+		}
+		else
+		{
+			// Handles INSERT on first tab char
+			if( penetrate )
+			{
+				if( line.content[0] == "\t" && x < tabStep )
+				{
+					this.moveY( -1 );
+					this.lineEnd( phantomSpace );
+					return;
+				}
+			}
+
+			var s = this.aX;
+			var a = rline[ s + d ];
+			var e = s;
+			if( d < 0 )
+			{
+				if( rline[ s ] == "\t" )
+				{
+					x -= tabStep;
+					if( x < 0 )
+						x = tabStep;
+				}
+
+				s += d;
+
+				var ntabs = occurence( rline.substring( s, e ), "\t" ) - 1;
+				if( 0 < ntabs ) x -= ntabs * tabStep;
+			}
+			else if( updatePx ) // && 0 < d ( assuming d can never be 0 )
+			{
+				// Going from one line to next
+				// linebreaks are *invisible*
+				var isLF = ( content[ x ] == "\n" ) ? 1 : 0;
+
+				if( s == 0 )
+				{
+					x = 1;
+					if ( rline[ 0 ] == "\t" )
+					{
+						x += tabStep;
+					}
+				}
+
+				e += d;
+
+				var ntabs = occurence( rline.substring( s + 1, e + 1 ), "\t" );
+				x += ntabs * tabStep + isLF;
+				if( 1 < d ) x += d - 1;
+			}
+			else // jk, non-X navigation. i.e., pX does not change
+			{
+				// s = 0, which is unused here
+				e = x + d;
+				x += ( occurence( rline.substring( 0, e ), "\t" ) ) * tabStep;
+				if( 1 < d ) x += d - 1;
 			}
 		}
 
@@ -6033,22 +6111,38 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 		if( updatePx )
 		{
-			this.pX = x;
+			this.pX = this.aX;
 			this.updatePosition();
 		}
 
 	};
 
-	Cursor.prototype.lineStart = function()
+	// fix the tab position
+	Cursor.prototype.fixTab = function()
 	{
-		this.pX = 0;
+		this.moveX( 1, false, true );
+		this.moveX( -1 );
+	};
+
+	Cursor.prototype.lineStart = function( atWord )
+	{
+		if( atWord )
+		{
+			var a = this.rawLine.match( /^[ \t]+/g );
+			this.pX = a ? a[0].length : 0;
+		}
+		else
+		{
+			this.pX = 0;
+		}
+
 		this.moveX();
 		this.updatePosition();
 	};
 
 	Cursor.prototype.lineEnd = function( phantomSpace )
 	{
-		this.moveX( Number.MAX_VALUE, false, phantomSpace );
+		this.moveX( Number.MAX_VALUE, false, phantomSpace, true );
 	};
 
 	Cursor.prototype.updatePosition = function()
@@ -7286,9 +7380,24 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		{
 			case SHIFT + A: // Append at the line end
 				ccur.lineEnd();
-			case A: // Append
-				ccur.moveX( 1, true, true );
+				ccur.moveX( 1, false, true, true );
+				ccur.openAction( "INSERT", e );
+				break;
 			case I: // Insert
+				if( 0 < ccur.X )
+				{
+					ccur.moveX( -1, true );
+					ccur.moveX( 1, true, true, true );
+				}
+				ccur.openAction( "INSERT", e );
+				break;
+			case A: // Append
+				ccur.fixTab();
+				ccur.moveX( 1, false, true, true );
+				ccur.openAction( "INSERT", e );
+				break;
+			case SHIFT + I: // Append at line start
+				ccur.lineStart( true );
 				ccur.openAction( "INSERT", e );
 				break;
 
@@ -7542,11 +7651,11 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			case SHIFT + L: // Last line buffer
 				break;
 
-			case _0: // Really - line Start
+			case _0: // Really line Start
 				ccur.lineStart();
 				break;
-			case SHIFT + _6: // ^, line Start, XXX: skip tabs
-				ccur.lineStart();
+			case SHIFT + _6: // ^, line Start at word
+				ccur.lineStart( true );
 				break;
 			case SHIFT + _4: // $, End
 				ccur.lineEnd( ccur.pSpace );
