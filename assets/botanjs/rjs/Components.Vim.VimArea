@@ -1528,7 +1528,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	ns[ NS_EXPORT ]( EX_CLASS, "Registers", Registers );
 
 })();
-;BotanJS.define( "Components.Vim" );VIMRE_VERSION = "1.0.0b";
+;BotanJS.define( "Components.Vim" );var VIMRE_VERSION = "1.0.0";
 (function(){
 	var ns = __namespace( "Components.Vim" );
 
@@ -1561,6 +1561,10 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		, "SEARCH_HIT_BOTTOM": "search hit BOTTOM, continuing at TOP"
 		, "SEARCH_HIT_TOP": "search hit TOP, continuing at BOTTOM"
 		, "REPLACE": "%1 substitution(s) on %2 line(s)"
+
+		, "VA_REC_START": "Recording Session ..."
+		, "VA_REC_REPLAY": "Replaying Session ..."
+		, "VA_REC_END": "Session Ended"
 	};
 
 	var errors = {
@@ -3158,6 +3162,1336 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	ns[ NS_EXPORT ]( EX_CLASS, "JOIN_LINES", JOIN_LINES );
 })();
+;BotanJS.define( "Components.Vim.State.History" );(function(){
+	var ns = __namespace( "Components.Vim.State" );
+
+	/** @type {System.Debug} */
+	var debug                        = __import( "System.Debug" );
+
+	// private static
+	var Zones = {};
+
+	var PartialBA = function( a, b )
+	{
+		var l = b.length;
+		if( a.length < l ) return false;
+
+		for( var i = 0; i < l; i ++ )
+		{
+			if( a[ i ] != b[ i ] ) return false;
+		}
+
+		return true;
+	};
+
+	var ExactAB = function( a, b )
+	{
+		var l = a.length < b.length ? b.length : a.length;
+		for( var i = 0; i < l; i ++ )
+		{
+			if( a[ i ] != b[ i ] ) return false;
+		}
+
+		return true;
+	}
+
+	var History = function( z )
+	{
+		if( !Zones[ z ] ) Zones[ z ] = [];
+
+		this.__pi = 0;
+		this.__zone = Zones[ z ];
+		this.reset();
+	};
+
+	History.prototype.push = function( stack )
+	{
+		if( this.__zone.length
+			&& ExactAB( this.__zone[ this.__zone.length - 1 ], stack )
+		) {
+			debug.Info( "This is the previous command, skipping" );
+			return;
+		}
+		this.__zone.push( stack );
+	};
+
+	History.prototype.prev = function( stack )
+	{
+		if( this.__zone.length <= this.__i ) this.reset();
+
+		while( -1 < this.__i )
+		{
+			var st = this.__zone[ this.__i -- ];
+			if( st && PartialBA( st, stack ) )
+			{
+				return st.slice();
+			}
+		}
+
+		return null;
+	};
+
+	History.prototype.next = function( stack )
+	{
+		if( this.__i < 0 )
+		{
+			this.__i ++;
+			this.next( stack );
+		}
+
+		while( this.__i < this.__zone.length )
+		{
+			var st = this.__zone[ this.__i ++ ];
+			if( st && PartialBA( st, stack ) )
+			{
+				return st.slice();
+			}
+		}
+
+		return null;
+	};
+
+	History.prototype.reset =  function()
+	{
+		this.__i = this.__zone.length - 1;
+	};
+
+	ns[ NS_EXPORT ]( EX_CLASS, "History", History );
+})();
+;BotanJS.define( "Components.Vim.Ex.Command" );(function(){
+	var ns = __namespace( "Components.Vim.Ex" );
+
+	/** @type {System.Cycle} */
+	var Cycle                        = __import( "System.Cycle" );
+	/** @type {System.Debug} */
+	var debug                        = __import( "System.Debug" );
+	/** @type {System.utils.Perf} */
+	var Perf                         = __import( "System.utils.Perf" );
+
+	/** @type {Components.Vim.State.History} */
+	var History                                 = __import( "Components.Vim.State.History" );
+	var Mesg                                    = __import( "Components.Vim.Message" );
+	var beep                                    = __import( "Components.Vim.Beep" );
+
+	// This is for security & privacy concerns?
+	var ZMap = {
+		"/": Perf.uuid
+		, ":" : Perf.uuid
+	};
+
+	/** @type {Components.Vim.IAction} */
+	var Command = function( Cursor, Mode )
+	{
+		var _self = this;
+		if( !ZMap[ Mode ] ) throw new Error( "Unsupport mode: " + Mode );
+
+		/** @type {Components.Vim.Cursor} */
+		this.__cursor = Cursor;
+
+		this.__statusBar = Cursor.Vim.statusBar;
+
+		this.__mode = Mode;
+		this.__hist = new History( ZMap[ Mode ] );
+
+		this.__command = [];
+		this.__currentCommand = null;
+		this.__blinkId = "ExCommandBlinkCycle" + Perf.uuid;
+		this.__curPos = 0;
+
+		var feeder = Cursor.feeder;
+
+		var __blink = false;
+		var __holdBlink = false;
+		this.__blink = function()
+		{
+			__blink = true;
+			__holdBlink = true
+		};
+
+		Cycle.perma( this.__blinkId, function()
+		{
+			if( __holdBlink ) __holdBlink = false;
+			else __blink = !__blink;
+
+			feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
+		}, 600 );
+
+		this.__doBlink = function()
+		{
+			var c = "";
+			var comm = _self.__command;
+			var pos = _self.__curPos;
+			var cLen = comm.length;
+			var faced = true;
+
+			for( var i = 0; i < cLen; i ++ )
+			{
+				var v = comm[i];
+				if( __blink && i == pos )
+				{
+					face = true;
+					v = Cursor.face + v.substr( 1 );
+				}
+
+				c+= v;
+			}
+
+			if( __blink && cLen <= pos )
+			{
+				c += Cursor.face;
+			}
+
+			return c;
+		};
+
+		this.__statusBar.override = this.__doBlink;
+	};
+
+	Command.prototype.dispose = function()
+	{
+		this.__statusBar.override = null;
+
+		Cycle.permaRemove( this.__blinkId );
+		var feeder = this.__cursor.feeder;
+		feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
+	};
+
+	Command.prototype.handler = function( e )
+	{
+		e.preventDefault();
+
+		if( e.ModKeys ) return;
+
+		this.__blink();
+
+		var InputKey = null;
+
+		var histNav = false;
+
+		if( e.kMap( "Tab" ) )
+		{
+			InputKey = "^I";
+		}
+		else if( e.kMap( "C-v" ) )
+		{
+			this.__direct = true;
+		}
+		else if( e.kMap( "BS" ) )
+		{
+			if( this.__curPos == 1 && 1 < this.__command.length )
+				return false;
+
+			this.__command.splice( --this.__curPos, 1 );
+			if( this.__command.length == 0 )
+			{
+				e.cancel();
+				return true;
+			}
+		}
+		else if( e.kMap( "Del" ) )
+		{
+			this.__command.splice( this.__curPos, 1 );
+		}
+		else if( e.kMap( "Enter" ) )
+		{
+			this.__process( e );
+			return true;
+		}
+		else if( e.kMap( "Left" ) )
+		{
+			if( 1 < this.__curPos ) this.__curPos --;
+		}
+		else if( e.kMap( "Right" ) )
+		{
+			if( this.__curPos < this.__command.length )
+				this.__curPos ++;
+		}
+
+		// History stepping
+		else if( histNav = e.kMap( "Up" ) ) // History navigations
+		{
+			if( !this.__currentCommand )
+			{
+				this.__currentCommand = this.__command;
+			}
+
+			var n = this.__hist.prev( this.__currentCommand );
+
+			if( n )
+			{
+				this.__command = n;
+				this.__curPos = n.length;
+			}
+			else
+			{
+				beep();
+			}
+		}
+		else if( histNav = e.kMap( "Down" ) )
+		{
+			var n = this.__hist.next( this.__currentCommand );
+
+			if( n )
+			{
+				this.__command = n;
+				this.__curPos = n.length;
+			}
+			else if( this.__currentCommand )
+			{
+				this.__command = this.__currentCommand;
+				this.__currentCommand = null;
+			}
+
+			else beep();
+		}
+		else
+		{
+			InputKey = e.key;
+		}
+
+		if( InputKey != null )
+		{
+			this.__command.splice( this.__curPos ++, 0, InputKey );
+		}
+
+		if( !histNav )
+		{
+			this.__hist.reset();
+			if( this.__currentCommand ) this.__currentCommand = this.__command;
+		}
+
+		e.cancel();
+
+		var feeder = this.__cursor.feeder;
+		feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
+	};
+
+	Command.prototype.__process = function( e )
+	{
+		this.__hist.push( this.__command );
+
+		var action = "";
+		switch( this.__mode )
+		{
+			case "/":
+				action = "FIND";
+				break;
+			case ":":
+				action = "EDITOR_COMMAND";
+				break;
+		}
+
+		var cur = this.__cursor;
+
+		cur.suppressEvent();
+		this.__cursor.openRunAction( action, e, this.__command.slice() );
+		cur.unsuppressEvent();
+	};
+
+	ns[ NS_EXPORT ]( EX_CLASS, "Command", Command );
+})();
+;BotanJS.define( "Components.Vim.Controls" );(function(){
+	var ns = __namespace( "Components.Vim" );
+
+	/** @type {System.Debug} */
+	var debug = __import( "System.Debug" );
+
+	/** @type {Components.Vim.Ex.Command} */
+	var ExCommand = __import( "Components.Vim.Ex.Command" );
+
+	var beep = ns[ NS_INVOKE ]( "Beep" );
+
+	var SHIFT = 1 << 9;
+	var CTRL = 1 << 10;
+	var ALT = 1 << 11;
+
+	var KEY_SHIFT = 16;
+	var KEY_CTRL = 17;
+	var KEY_ALT = 18;
+
+	var BACKSPACE = 8;
+	var TAB = 9;
+	var ENTER = 13;
+	var DELETE = 46;
+	var SPACE = 32;
+
+	var UP = 38; var DOWN = 40; var LEFT = 37; var RIGHT = 39;
+
+	var _0 = 48; var _1 = 49; var _2 = 50; var _3 = 51; var _4 = 52;
+	var _5 = 53; var _6 = 54; var _7 = 55; var _8 = 56; var _9 = 57;
+
+	var SEMI_COLON = 59; var GECKO_SEMI_COLON = 186;
+
+	var EQUAL = 61; var GECKO_EQUAL = 187;
+
+	var A = 65; var B = 66; var C = 67; var D = 68; var E = 69;
+	var F = 70; var G = 71; var H = 72; var I = 73; var J = 74;
+	var K = 75; var L = 76; var M = 77; var N = 78; var O = 79;
+	var P = 80; var Q = 81; var R = 82; var S = 83; var T = 84;
+	var U = 85; var V = 86; var W = 87; var X = 88; var Y = 89;
+	var Z = 90;
+
+	var S_BRACKET_L = 219; var S_BRACKET_R = 221;
+
+	var ESC = 27;
+
+	var F1 = 112; var F2 = 113; var F3 = 114; var F4 = 115; var F5 = 116;
+	var F6 = 117; var F7 = 118; var F8 = 119; var F9 = 120; var F10 = 121;
+	var F11 = 122; var F12 = 123;
+
+	var DASH = 173; var GECKO_DASH = 189;
+	var COMMA = 188; var FULLSTOP = 190;
+	var SLASH = 191; var BACK_SLASH = 220;
+
+	var QUOTE = 222;
+
+	var ANY_KEY = -1;
+
+	var __maps = {};
+	var Map = function( str )
+	{
+		if( __maps[ str ] ) return __maps[ str ];
+
+		// C-Left, A-Up ...
+		var Code = str.split( "-" );
+		var sCode = Code[0];
+
+		var Mod = 0;
+		if( Code.length == 2 )
+		{
+			var m = true;
+			switch( Code[0] )
+			{
+				case "C": Mod = CTRL; break;
+				case "A": Mod = ALT; break;
+				case "S": Mod = SHIFT; break;
+				default:
+					m = false;
+			}
+
+			if( m )
+			{
+				sCode = Code[1];
+			}
+		}
+
+		var kCode;
+		switch( sCode )
+		{
+			case "BS": kCode = Mod + BACKSPACE; break;
+			case "Del": kCode = Mod + DELETE; break;
+			case "Enter": kCode = Mod + ENTER; break;
+			case "Tab": kCode = Mod + TAB; break;
+			case "Escape": kCode = Mod + ESC; break;
+
+			case "Up": kCode = Mod + UP; break;
+			case "Down": kCode = Mod + DOWN; break;
+			case "Left": kCode = Mod + LEFT; break;
+			case "Right": kCode = Mod + RIGHT; break;
+
+			case "A": Mod = SHIFT; case "a": kCode = Mod + A; break;
+			case "B": Mod = SHIFT; case "b": kCode = Mod + B; break;
+			case "C": Mod = SHIFT; case "c": kCode = Mod + C; break;
+			case "D": Mod = SHIFT; case "d": kCode = Mod + D; break;
+			case "E": Mod = SHIFT; case "e": kCode = Mod + E; break;
+			case "F": Mod = SHIFT; case "f": kCode = Mod + F; break;
+			case "G": Mod = SHIFT; case "g": kCode = Mod + G; break;
+			case "H": Mod = SHIFT; case "h": kCode = Mod + H; break;
+			case "I": Mod = SHIFT; case "i": kCode = Mod + I; break;
+			case "J": Mod = SHIFT; case "j": kCode = Mod + J; break;
+			case "K": Mod = SHIFT; case "k": kCode = Mod + K; break;
+			case "L": Mod = SHIFT; case "l": kCode = Mod + L; break;
+			case "M": Mod = SHIFT; case "m": kCode = Mod + M; break;
+			case "N": Mod = SHIFT; case "n": kCode = Mod + N; break;
+			case "O": Mod = SHIFT; case "o": kCode = Mod + O; break;
+			case "P": Mod = SHIFT; case "p": kCode = Mod + P; break;
+			case "Q": Mod = SHIFT; case "q": kCode = Mod + Q; break;
+			case "R": Mod = SHIFT; case "r": kCode = Mod + R; break;
+			case "S": Mod = SHIFT; case "s": kCode = Mod + S; break;
+			case "T": Mod = SHIFT; case "t": kCode = Mod + T; break;
+			case "U": Mod = SHIFT; case "u": kCode = Mod + U; break;
+			case "V": Mod = SHIFT; case "v": kCode = Mod + V; break;
+			case "W": Mod = SHIFT; case "w": kCode = Mod + W; break;
+			case "X": Mod = SHIFT; case "x": kCode = Mod + X; break;
+			case "Y": Mod = SHIFT; case "y": kCode = Mod + Y; break;
+			case "Z": Mod = SHIFT; case "z": kCode = Mod + Z; break;
+
+			case "!": Mod = SHIFT; case "1": kCode = Mod + _1; break;
+			case "@": Mod = SHIFT; case "2": kCode = Mod + _2; break;
+			case "#": Mod = SHIFT; case "3": kCode = Mod + _3; break;
+			case "$": Mod = SHIFT; case "4": kCode = Mod + _4; break;
+			case "%": Mod = SHIFT; case "5": kCode = Mod + _5; break;
+			case "^": Mod = SHIFT; case "6": kCode = Mod + _6; break;
+			case "&": Mod = SHIFT; case "7": kCode = Mod + _7; break;
+			case "*": Mod = SHIFT; case "8": kCode = Mod + _8; break;
+			case "(": Mod = SHIFT; case "9": kCode = Mod + _9; break;
+			case ")": Mod = SHIFT; case "0": kCode = Mod + _0; break;
+			case "<": Mod = SHIFT; case ",": kCode = Mod + COMMA; break;
+			case ">": Mod = SHIFT; case ".": kCode = Mod + FULLSTOP; break;
+
+			default:
+				throw new Error( "Unsupport keys: " + str );
+		}
+
+		return __maps[ str ] = kCode;
+	};
+
+	// Polyfill for Chrome < 51
+	var RMap = function( kCode )
+	{
+		switch( kCode )
+		{
+			case SPACE: case SHIFT + SPACE: return " ";
+			case A: return "a"; case B: return "b"; case C: return "c"; case D: return "d";
+			case E: return "e"; case F: return "f"; case G: return "g"; case H: return "h";
+			case I: return "i"; case J: return "j"; case K: return "k"; case L: return "l";
+			case M: return "m"; case N: return "n"; case O: return "o"; case P: return "p";
+			case Q: return "q"; case R: return "r"; case S: return "s"; case T: return "t";
+			case U: return "u"; case V: return "v"; case W: return "w"; case X: return "x";
+			case Y: return "y"; case Z: return "z";
+			case _1: return "1"; case _2: return "2"; case _3: return "3";
+			case _4: return "4"; case _5: return "5"; case _6: return "6"; case _7: return "7";
+			case _8: return "8"; case _9: return "9"; case _0: return "0";
+
+			case S_BRACKET_L: return "["; case S_BRACKET_R: return "]";
+			case SEMI_COLON: case GECKO_SEMI_COLON: return ";";
+			case QUOTE: return "'"; case COMMA: return ",";
+			case FULLSTOP: return "."; case SLASH: return "/"; case BACK_SLASH: return "\\";
+			case DASH: case GECKO_DASH: return "-"; case EQUAL: case GECKO_EQUAL: return "=";
+
+			case SHIFT + _1: return "!"; case SHIFT + _2: return "@"; case SHIFT + _3: return "#";
+			case SHIFT + _4: return "$"; case SHIFT + _5: return "%"; case SHIFT + _6: return "^";
+			case SHIFT + _7: return "&"; case SHIFT + _8: return "*"; case SHIFT + _9: return "(";
+			case SHIFT + _0: return ")";
+
+			case SHIFT + S_BRACKET_L: return "{"; case SHIFT + S_BRACKET_R: return "}";
+			case SHIFT + SEMI_COLON: case SHIFT + GECKO_SEMI_COLON: return ":";
+			case SHIFT + QUOTE: return "\"";
+			case SHIFT + COMMA: return "<"; case SHIFT + FULLSTOP: return ">";
+			case SHIFT + SLASH: return "?"; case SHIFT + BACK_SLASH: return "|";
+			case SHIFT + DASH: case SHIFT + GECKO_DASH: return "_";
+			case SHIFT + EQUAL: case SHIFT + GECKO_EQUAL: return "+";
+
+			case SHIFT + A: return "A"; case SHIFT + B: return "B"; case SHIFT + C: return "C";
+			case SHIFT + D: return "D"; case SHIFT + E: return "E"; case SHIFT + F: return "F";
+			case SHIFT + G: return "G"; case SHIFT + H: return "H"; case SHIFT + I: return "I";
+			case SHIFT + J: return "J"; case SHIFT + K: return "K"; case SHIFT + L: return "L";
+			case SHIFT + M: return "M"; case SHIFT + N: return "N"; case SHIFT + O: return "O";
+			case SHIFT + P: return "P"; case SHIFT + Q: return "Q"; case SHIFT + R: return "R";
+			case SHIFT + S: return "S"; case SHIFT + T: return "T"; case SHIFT + U: return "U";
+			case SHIFT + V: return "V"; case SHIFT + W: return "W"; case SHIFT + X: return "X";
+			case SHIFT + Y: return "Y"; case SHIFT + Z: return "Z";
+			case SHIFT + BACKSPACE: case BACKSPACE: return "Backspace";
+			case ESC: return "Escape"; case DELETE: return "Delete";
+			case SHIFT: return "Shift"; case ALT: return "Alt"; case CTRL: return "Control";
+			case ENTER: return "Enter"; case TAB: return "Tab";
+		}
+
+		return "?";
+	};
+
+	var Controls = function( vimArea )
+	{
+		/** @type {Components.Vim.VimArea} */
+		this.__vimArea = vimArea
+
+		this.__cfeeder = vimArea.contentFeeder;
+		this.__sfeeder = vimArea.statusFeeder;
+
+		this.__ccur = this.__cfeeder.cursor;
+
+		// Dived composite command handler
+		// Has full control of the key input, except Esc
+		this.__divedCCmd = null;
+	};
+
+	Controls.prototype.__composite = function( e, handler )
+	{
+		if( handler )
+		{
+			if( !this.__compositeReg ) this.__compositeReg = [];
+			this.__compositeReg.push({
+				keys: Array.prototype.slice.call( arguments, 2 )
+				, handler: handler
+				, i: 0
+			});
+			return true;
+		}
+
+		var kCode = e.keyCode;
+
+		for( var i = 0; i < this.__compositeReg.length; i ++ )
+		{
+			var compReg = this.__compositeReg[i];
+			var keys = compReg.keys;
+			var key = keys[ compReg.i ++ ];
+
+			if( key == ANY_KEY || key == kCode )
+			{
+				if( compReg.i == keys.length )
+				{
+					this.__compositeReg = null;
+					compReg.handler( e );
+				}
+
+				return true;
+			}
+		}
+
+		if( this.__compositeReg ) beep();
+		this.__compositeReg = null;
+		return false;
+	};
+
+	Controls.prototype.__actionCommand = function( e )
+	{
+		var ActionHandled = true;
+		var ccur = this.__ccur;
+
+		// Action Command
+		switch( e.keyCode )
+		{
+			case SHIFT + A: // Append at the line end
+				ccur.lineEnd();
+				ccur.moveX( 1, false, true, true );
+				ccur.openAction( "INSERT", e );
+				break;
+			case I: // Insert
+				if( 0 < ccur.X )
+				{
+					ccur.moveX( -1, true );
+					ccur.moveX( 1, true, true, true );
+				}
+				ccur.openAction( "INSERT", e );
+				break;
+			case A: // Append
+				ccur.fixTab();
+				ccur.moveX( 1, false, true, true );
+				ccur.openAction( "INSERT", e );
+				break;
+			case SHIFT + I: // Append at line start
+				ccur.lineStart( true );
+				ccur.openAction( "INSERT", e );
+				break;
+
+			case S: // Delete Char and start insert
+				if( ccur.getLine().content != "" )
+				{
+					ccur.openRunAction( "DELETE", e, ccur.aPos );
+				}
+				ccur.openAction( "INSERT", e );
+				break;
+
+			case SHIFT + O: // new line before insert
+				ccur.lineStart();
+				ccur.openAction( "INSERT", e );
+				ccur.action.handler( new ActionEvent( e.sender, "Enter" ) );
+				ccur.moveY( -1 );
+				break;
+			case O: // new line insert
+				ccur.lineEnd( true );
+				ccur.openAction( "INSERT", e );
+				ccur.action.handler( new ActionEvent( e.sender, "Enter" ) );
+				break;
+
+			case U: // Undo
+				ccur.openRunAction( "UNDO", e );
+				break;
+			case CTRL + R: // Redo
+				ccur.openRunAction( "REDO", e );
+				break;
+
+			case D: // Del with motion
+				ccur.openAction( "DELETE", e );
+				break;
+			case Y: // Yank with motion
+				ccur.openAction( "YANK", e );
+				break;
+
+			case P: // Put
+				ccur.suppressEvent();
+				ccur.moveX( 1, false, true );
+				ccur.unsuppressEvent();
+			case SHIFT + P: // Put before
+				ccur.openRunAction( "PUT", e );
+				break;
+
+			case SHIFT + X: // Delete before
+				if( !this.__cMoveX( -1 ) ) break;
+			case X: // Del
+				if( ccur.getLine().content == "" )
+				{
+					beep();
+					break;
+				}
+				ccur.openRunAction( "DELETE", e, ccur.aPos );
+				break;
+			case SHIFT + U: // Undo previous changes in oneline
+				break;
+			case SHIFT + I: // Append before the line start, after spaces
+				break;
+			case SHIFT + J: // Join lines
+				ccur.openRunAction( "JOIN_LINES", e );
+				break;
+			case SHIFT + K: // Find the manual entry
+				break;
+
+			case V: // Visual
+			case SHIFT + V: // Visual line
+				ccur.openAction( "VISUAL", e );
+				ccur.action.handler( e );
+				break;
+
+			case SHIFT + SEMI_COLON: // ":" Command line
+			case SHIFT + GECKO_SEMI_COLON:
+				this.__divedCCmd = new ExCommand( ccur, ":" );
+				this.__divedCCmd.handler( e );
+				break;
+
+			case SHIFT + COMMA: // <
+			case SHIFT + FULLSTOP: // >
+				ccur.openAction( "SHIFT_LINES", e );
+				break;
+
+			case F1: // F1, help
+				break;
+			default:
+				ActionHandled = false;
+		}
+
+		return ActionHandled;
+	};
+
+	Controls.prototype.__cMoveX = function( a, b, c )
+	{
+		var ccur = this.__ccur;
+
+		var x = ccur.X;
+		var y = ccur.Y;
+		ccur.moveX( a, b, c || ccur.pSpace );
+		if( ccur.X == x && ccur.Y == y )
+		{
+			beep();
+			return false;
+		}
+		return true;
+	};
+
+	Controls.prototype.__cMoveY = function( a )
+	{
+		var ccur = this.__ccur;
+		var cfeeder = this.__cfeeder;
+
+		var y = ccur.Y + cfeeder.panY;
+		ccur.moveY( a );
+		if( y == ( ccur.Y + cfeeder.panY ) )
+		{
+			if( 0 < a && !cfeeder.EOF ) return true;
+			beep();
+		}
+
+		return false;
+	};
+
+	Controls.prototype.__modCommand = function( e )
+	{
+		if( this.__mod )
+		{
+			e.preventDefault();
+			this.__composite( e );
+			return;
+		}
+
+		var _self = this;
+		var mod = true;
+
+		var cur = this.__cursor;
+		switch( e.keyCode )
+		{
+			case SHIFT + QUOTE:
+				this.__composite( e, function( e2 ) {
+					e2.target.registers.select( e2.key );
+					e2.cancel();
+
+					_self.__mod = false;
+				}, ANY_KEY );
+				break;
+			case _0: // No 0 for first count
+				if( !this.__compositeReg )
+				{
+					mod = false;
+					break;
+				}
+			case _1: case _2: case _3: case _4:
+			case _5: case _6: case _7: case _8: case _9:
+
+				var Count = e.key;
+				var recurNum = function( e )
+				{
+					var intercept = e.ModKeys;
+					switch( e.keyCode )
+					{
+						case _0: case _1: case _2:
+						case _3: case _4: case _5:
+						case _6: case _7: case _8: case _9:
+							Count += e.key;
+							intercept = true;
+					}
+
+					if( intercept )
+					{
+						_self.__composite( e, recurNum, ANY_KEY );
+						e.cancel();
+						return;
+					}
+
+					e.__count = Number( Count );
+					debug.Info( "Count is: " + Count );
+					_self.__mod = false;
+				};
+
+				this.__composite( e, recurNum, ANY_KEY );
+				break;
+			default:
+				mod = false;
+		}
+
+		this.__mod = mod;
+		if( mod )
+		{
+			e.cancel();
+		}
+	};
+
+	Controls.prototype.__cursorCommand = function( e )
+	{
+		var kCode = e.keyCode;
+
+		if( this.__cMovement )
+		{
+			if( !e.ModKeys )
+			{
+				this.__composite( e );
+				this.__cMovement = false;
+				return true;
+			}
+		}
+
+		var ccur = this.__ccur;
+		var cfeeder = ccur.feeder;
+
+		var cursorHandled = true;
+		switch( kCode )
+		{
+			case BACKSPACE: this.__cMoveX( -1, true ); break; // Backspace, go back 1 char
+			case H: this.__cMoveX( - e.count ); break; // Left
+			case L: this.__cMoveX( e.count ); break; // Right
+			case DASH: case GECKO_DASH:
+			case K: this.__cMoveY( - e.count ); break; // Up
+			case ENTER:
+			case J: this.__cMoveY( e.count ); break; // Down
+
+			case CTRL + F: // Page Down
+				if( cfeeder.firstBuffer.nextLine.placeholder )
+				{
+					beep();
+					break;
+				}
+
+				var oPan = cfeeder.panY;
+				cfeeder.pan( undefined, cfeeder.moreAt );
+				cfeeder.softReset();
+
+				ccur.moveY( -ccur.Y );
+
+				break;
+			case CTRL + B: // Page Up
+				if( cfeeder.panY == 0 )
+				{
+					beep();
+					break;
+				}
+				cfeeder.pan( undefined, -cfeeder.moreAt );
+				cfeeder.softReset();
+
+				ccur.moveY( -ccur.Y );
+				if( !cfeeder.EOF ) ccur.moveY( cfeeder.moreAt );
+				break;
+
+			case SHIFT + H: // First line buffer
+				break;
+			case SHIFT + L: // Last line buffer
+				break;
+
+			case _0: // Really line Start
+				ccur.lineStart();
+				break;
+			case SHIFT + _6: // ^, line Start at word
+				ccur.lineStart( true );
+				break;
+			case SHIFT + _4: // $, End
+				ccur.lineEnd( ccur.pSpace );
+				break;
+			case SHIFT + G: // Goto last line
+				ccur.moveY( Number.MAX_VALUE );
+				ccur.moveX( Number.MAX_VALUE, true );
+				break
+
+			case SHIFT + _5: // %, Find next item
+				var analyzer = this.__vimArea.contentAnalyzer;
+
+				/** @type {Components.Vim.Syntax.TokenMatch} */
+				var bracketMatch = analyzer.bracketAt( ccur.aPos );
+
+				if( bracketMatch.open == -1 )
+				{
+					beep();
+					break;
+				}
+
+				ccur.moveTo(
+					bracketMatch.selected == bracketMatch.close
+						? bracketMatch.open
+						: bracketMatch.close
+				);
+
+				break;
+
+
+			case SHIFT + T: // To
+			case T: // To
+				this.__cMovement = true;
+
+				this.__composite( e, function( e2 ) {
+					var oX = ccur.X;
+					ccur.openRunAction( "TO", e, e2 );
+
+					if( ccur.X < oX )
+					{
+						ccur.moveX( 1 );
+					}
+					else if( oX < ccur.X )
+					{
+						ccur.moveX( -1 );
+					}
+				}, ANY_KEY );
+
+				break;
+			case SHIFT + F: // To
+			case F: // To
+				this.__cMovement = true;
+
+				this.__composite( e, function( e2 ) {
+					ccur.openRunAction( "TO", e, e2 );
+				}, ANY_KEY );
+
+				break;
+
+			case W: // word
+			case SHIFT + W:
+			case B:
+			case SHIFT + B:
+				ccur.openRunAction( "WORD", e );
+				break
+
+
+			case I: // In between boundary
+				if( !ccur.action )
+				{
+					cursorHandled = false;
+					break;
+				}
+
+				var analyzer = this.__vimArea.contentAnalyzer;
+
+				this.__cMovement = true;
+
+				// Word boundary
+				this.__composite( e, function( e2 ) {
+					var WordMatch = analyzer.wordAt( ccur.aPos );
+					e2.__range = WordMatch;
+				}, W );
+
+				var bracket = function( e2 ) {
+					var BracketMatch = analyzer.bracketIn( "(", ccur.aPos );
+					e2.__range = BracketMatch;
+				};
+				var curlyBracket = function( e2 ) {
+					var BracketMatch = analyzer.bracketIn( "{", ccur.aPos );
+					e2.__range = BracketMatch;
+				};
+				var squareBracket = function( e2 ) {
+					var BracketMatch = analyzer.bracketIn( "[", ccur.aPos );
+					e2.__range = BracketMatch;
+				};
+				var singleQuote = function( e2 ) {
+					var BracketMatch = analyzer.quoteIn( "'", ccur.aPos );
+					e2.__range = BracketMatch;
+				};
+				var doubleQuote = function( e2 ) {
+					var BracketMatch = analyzer.quoteIn( "\"", ccur.aPos );
+					e2.__range = BracketMatch;
+				};
+
+				// Bracket boundaries
+				this.__composite( e, bracket, SHIFT + _0 );
+				this.__composite( e, bracket, SHIFT + _9 );
+				this.__composite( e, squareBracket, S_BRACKET_L );
+				this.__composite( e, squareBracket, S_BRACKET_R );
+				this.__composite( e, curlyBracket, SHIFT + S_BRACKET_L );
+				this.__composite( e, curlyBracket, SHIFT + S_BRACKET_R );
+
+				// Quote boundaries
+				this.__composite( e, singleQuote, QUOTE );
+				this.__composite( e, doubleQuote, SHIFT + QUOTE );
+				break;
+
+			case G:
+
+				this.__cMovement = true;
+
+				// Go to top
+				this.__composite( e, function() {
+					ccur.moveY( -Number.MAX_VALUE );
+					ccur.moveX( -Number.MAX_VALUE, true );
+				}, G );
+
+				// Print Hex
+				this.__composite( e, function() {
+					ccur.openRunAction( "PRINT_HEX", e );
+				}, _8 );
+
+				// to lowercase
+				this.__composite( e, function( e2 ) {
+					if( ccur.action ) { beep(); return; }
+					// TODO
+				}, U );
+
+				// to uppercase
+				this.__composite( e, function( e2 ) {
+					if( ccur.action ) { beep(); return; }
+					// TODO
+				}, SHIFT + U );
+				break;
+
+			case SHIFT + N: // Next Search
+			case N: // Next Search
+				ccur.openRunAction( "FIND", e );
+				break;
+
+			case SLASH: // "/" Search movement
+				this.__cMovement = true;
+
+				this.__divedCCmd = new ExCommand( ccur, "/" );
+				this.__divedCCmd.handler( e );
+				break;
+			default:
+				cursorHandled = false;
+		}
+
+		return cursorHandled;
+	};
+
+	/**
+	 * sender @param  {Components.Vim.VimArea}
+	 * e @param {Components.Vim.Controls.ActionEvent}
+	 * */
+	Controls.prototype.handler = function( sender, e )
+	{
+		// Never capture these keys
+		if( e.keyCode == ( ALT + D )
+			// F2 - F12
+			|| ( F1 < e.keyCode && e.keyCode <= F12 )
+		) return;
+
+		// Clear composite command
+		if( e.Escape )
+		{
+			var b = false;
+			this.__cMovement = false;
+
+			if( this.__compositeReg )
+			{
+				b = true;
+				this.__compositeReg = null;
+			}
+			else if( this.__divedCCmd )
+			{
+				b = true;
+				this.__divedCCmd.dispose();
+				this.__divedCCmd = null;
+			}
+
+			if( b )
+			{
+				beep();
+				return;
+			}
+		}
+
+		if( this.__divedCCmd )
+		{
+			if( this.__divedCCmd.handler( e ) )
+			{
+				this.__divedCCmd.dispose();
+				this.__cMovement = false;
+				this.__divedCCmd = null;
+				return;
+			}
+
+			if( e.canceled ) return;
+		}
+
+		var cfeeder = this.__cfeeder;
+		var ccur = this.__ccur;
+
+		if( !this.__cMovement && ( !ccur.action || ccur.action.allowMovement ) )
+		{
+			this.__modCommand( e );
+			if( e.canceled ) return;
+		}
+
+		var kCode = e.keyCode;
+
+		// Action commands are handled by the actions themselves
+		if( ccur.action )
+		{
+			if( e.Escape )
+			{
+				e.preventDefault();
+				ccur.closeAction();
+			}
+			else
+			{
+				if( ccur.action.allowMovement )
+				{
+					var SubCommand = !this.__compositeReg;
+					this.__cursorCommand( e, kCode );
+					if( SubCommand && this.__compositeReg )
+					{
+						e.preventDefault();
+						return;
+					}
+				}
+
+				if( ccur.action.handler( e ) )
+				{
+					ccur.closeAction();
+				}
+			}
+			return;
+		}
+
+		e.preventDefault();
+
+		if( this.__cursorCommand( e ) ) return;
+		if( this.__actionCommand( e ) ) return;
+	};
+
+	var ActionEvent = function( sender, e )
+	{
+		this.__target = sender;
+		this.__canceled = false;
+
+		if( typeof( e ) == "string" )
+		{
+			this.__key = e;
+			this.__modKeys = 0;
+			this.__kCode = Map( e );
+			this.__escape = this.__kCode == ESC;
+		}
+		else if( typeof( e ) == "number" )
+		{
+			this.__key = RMap( e );
+			this.__modKeys = 0;
+			this.__kCode = e;
+			this.__escape = this.__kCode == ESC || this.__kCode == ( CTRL + C );
+		}
+		else
+		{
+			this.__e = e;
+
+			// KeyCode HotFix
+			if( e.key == ";" || e.key == ":" )
+			{
+				SEMI_COLON = e.keyCode;
+			}
+
+			var c = this.__e.keyCode;
+
+			this.__escape = c == ESC || ( e.ctrlKey && c == C );
+			this.__kCode = c
+				+ ( e.shiftKey || e.getModifierState( "CapsLock" ) ? SHIFT : 0 )
+				+ ( e.ctrlKey ? CTRL : 0 )
+				+ ( e.altKey ? ALT : 0 );
+
+			this.__modKeys = c == KEY_SHIFT || c == KEY_CTRL || c == KEY_ALT;
+			this.__key = e.key || RMap( this.__kCode );
+		}
+
+		this.__count = 1;
+		this.__range = null;
+	};
+
+	__readOnly( ActionEvent.prototype, "target", function() { return this.__target; } );
+	__readOnly( ActionEvent.prototype, "key", function() { return this.__key; } );
+	__readOnly( ActionEvent.prototype, "keyCode", function() { return this.__kCode; } );
+	__readOnly( ActionEvent.prototype, "ModKeys", function() { return this.__modKeys; } );
+	__readOnly( ActionEvent.prototype, "Escape", function() { return this.__escape; } );
+	__readOnly( ActionEvent.prototype, "canceled", function() { return this.__canceled; } );
+
+	__readOnly( ActionEvent.prototype, "range", function() {
+
+		/** @type {Components.Vim.Syntax.TokenMatch} */
+		var r = this.__range;
+
+		if( r && r.open == -1 && r.close == -1 )
+		{
+			return null;
+		}
+
+		return r;
+	} );
+
+	__readOnly( ActionEvent.prototype, "count", function() {
+		return this.__count;
+	} );
+
+	ActionEvent.prototype.kMap = function( map )
+	{
+		return this.__kCode == Map( map );
+	};
+
+	ActionEvent.prototype.cancel = function()
+	{
+		this.preventDefault();
+		this.__canceled = true;
+	};
+
+	ActionEvent.prototype.preventDefault = function()
+	{
+		if( this.__e ) this.__e.preventDefault();
+	};
+
+	ns[ NS_EXPORT ]( EX_CLASS, "Controls", Controls );
+	ns[ NS_EXPORT ]( EX_CLASS, "ActionEvent", ActionEvent );
+})();
+;BotanJS.define( "Components.Vim.Actions.VA_REC" );(function(){
+	var ns = __namespace( "Components.Vim.Actions" );
+
+	/** @type {System.Debug} */
+	var debug                                     = __import( "System.Debug" );
+	/** @type {System.utils.EventKey} */
+	var EventKey                                  = __import( "System.utils.EventKey" );
+	/** @type {Components.Vim.ActionEvent} */
+	var ActionEvent                               = __import( "Components.Vim.ActionEvent" );
+
+	var Mesg = __import( "Components.Vim.Message" );
+
+	// Recording Sessions
+	var Sessions = [];
+
+	/** @type {Components.Vim.IAction} */
+	var VA_REC = function( Cursor )
+	{
+		/** @type {Components.Vim.Cursor} */
+		this.__cursor = Cursor;
+		this.__msg = Mesg( "VA_REC_START" );
+		Cursor.suppressEvent();
+	};
+
+	VA_REC.prototype.dispose = function()
+	{
+		this.__cursor.unsuppressEvent();
+	};
+
+	VA_REC.prototype.handler = function( e, args, range )
+	{
+		if( args == true )
+		{
+			var msg = Mesg( "VA_REC_END" );
+			var lastLine = Mesg( "WAIT_FOR_INPUT" );
+
+			var l = this.__cursor.feeder.firstBuffer.cols;
+			for( var i = msg.length; i < l; i ++ ) msg += " ";
+
+			this.__msg = msg + "\n" + lastLine;
+			return;
+		}
+
+		e.preventDefault();
+		var inst = this.__cursor.Vim;
+		var sender = inst.stage;
+		var sIndex = inst.index;
+
+		var session;
+
+		if( Sessions[ sIndex ] )
+		{
+			session = Sessions[ sIndex ];
+		}
+		else
+		{
+			session = Sessions[ sIndex ] = {};
+		}
+
+		if( session.started )
+		{
+			session.__dispose();
+			var head = "Press Escape to conitnue edit\n===\n";
+			var data = JSON.stringify( session.data );
+
+			var element = sender.element;
+			setTimeout( function() {
+				inst.display(
+					head + data, function(){
+					element.selectionStart = head.length;
+					element.selectionEnd = element.selectionStart + data.length;
+				} );
+			}, 1 );
+			return;
+		}
+		else
+		{
+			session.started = true;
+		}
+
+		var sessData = session.data = [];
+		var lastTime = Date.now();
+
+		session.__event = new EventKey(
+			"KeyDown", function( e2 )
+			{
+				var evt = new ActionEvent( sender, e2 );
+				if( [ "Control", "Alt", "Shift" ].indexOf( e2.key ) != -1 ) return;
+
+				var now = Date.now();
+				sessData.push( now - lastTime, evt.keyCode );
+				lastTime = now;
+			}
+		);
+
+		var feeder = this.__cursor.feeder;
+
+		// Handles quit event on VimArea
+		session.__dispose = function() {
+			debug.Info( "VA_REC: Disposing active session" );
+			delete Sessions[ sIndex ];
+			sender.removeEventListener( session.__event );
+			inst.removeEventListener( "Dispose", session.__dispose );
+		};
+
+		inst.addEventListener( "Dispose", session.__dispose );
+		sender.addEventListener( session.__event );
+	};
+
+	VA_REC.prototype.getMessage = function()
+	{
+		return this.__msg;
+	};
+
+	ns[ NS_EXPORT ]( EX_CLASS, "VA_REC", VA_REC );
+})();
 ;BotanJS.define( "Components.Vim.Actions.VERSION" );(function(){
 	var ns = __namespace( "Components.Vim.Actions" );
 
@@ -3572,6 +4906,9 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			s = cur.aPos;
 			e = sp;
 		}
+
+		// For removing the very last line
+		if( c[ sp ] == undefined ) s --;
 
 		var removed = c.substring( s, e + 1 );
 		reg.change( removed, newLine );
@@ -5373,6 +6710,9 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			case "help":
 				out[ CMD_TYPE ] = "HELP";
 				break;
+			case "varec":
+				out[ CMD_TYPE ] = "VA_REC";
+				break;
 		}
 
 		if( range !== "" )
@@ -6791,1212 +8131,6 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	ns[ NS_EXPORT ]( EX_CLASS, "StatusBar", StatusBar );
 })();
-;BotanJS.define( "Components.Vim.State.History" );(function(){
-	var ns = __namespace( "Components.Vim.State" );
-
-	/** @type {System.Debug} */
-	var debug                        = __import( "System.Debug" );
-
-	// private static
-	var Zones = {};
-
-	var PartialBA = function( a, b )
-	{
-		var l = b.length;
-		if( a.length < l ) return false;
-
-		for( var i = 0; i < l; i ++ )
-		{
-			if( a[ i ] != b[ i ] ) return false;
-		}
-
-		return true;
-	};
-
-	var ExactAB = function( a, b )
-	{
-		var l = a.length < b.length ? b.length : a.length;
-		for( var i = 0; i < l; i ++ )
-		{
-			if( a[ i ] != b[ i ] ) return false;
-		}
-
-		return true;
-	}
-
-	var History = function( z )
-	{
-		if( !Zones[ z ] ) Zones[ z ] = [];
-
-		this.__pi = 0;
-		this.__zone = Zones[ z ];
-		this.reset();
-	};
-
-	History.prototype.push = function( stack )
-	{
-		if( this.__zone.length
-			&& ExactAB( this.__zone[ this.__zone.length - 1 ], stack )
-		) {
-			debug.Info( "This is the previous command, skipping" );
-			return;
-		}
-		this.__zone.push( stack );
-	};
-
-	History.prototype.prev = function( stack )
-	{
-		if( this.__zone.length <= this.__i ) this.reset();
-
-		while( -1 < this.__i )
-		{
-			var st = this.__zone[ this.__i -- ];
-			if( st && PartialBA( st, stack ) )
-			{
-				return st.slice();
-			}
-		}
-
-		return null;
-	};
-
-	History.prototype.next = function( stack )
-	{
-		if( this.__i < 0 )
-		{
-			this.__i ++;
-			this.next( stack );
-		}
-
-		while( this.__i < this.__zone.length )
-		{
-			var st = this.__zone[ this.__i ++ ];
-			if( st && PartialBA( st, stack ) )
-			{
-				return st.slice();
-			}
-		}
-
-		return null;
-	};
-
-	History.prototype.reset =  function()
-	{
-		this.__i = this.__zone.length - 1;
-	};
-
-	ns[ NS_EXPORT ]( EX_CLASS, "History", History );
-})();
-;BotanJS.define( "Components.Vim.Ex.Command" );(function(){
-	var ns = __namespace( "Components.Vim.Ex" );
-
-	/** @type {System.Cycle} */
-	var Cycle                        = __import( "System.Cycle" );
-	/** @type {System.Debug} */
-	var debug                        = __import( "System.Debug" );
-	/** @type {System.utils.Perf} */
-	var Perf                         = __import( "System.utils.Perf" );
-
-	/** @type {Components.Vim.State.History} */
-	var History                                 = __import( "Components.Vim.State.History" );
-	var Mesg                                    = __import( "Components.Vim.Message" );
-	var beep                                    = __import( "Components.Vim.Beep" );
-
-	// This is for security & privacy concerns?
-	var ZMap = {
-		"/": Perf.uuid
-		, ":" : Perf.uuid
-	};
-
-	/** @type {Components.Vim.IAction} */
-	var Command = function( Cursor, Mode )
-	{
-		var _self = this;
-		if( !ZMap[ Mode ] ) throw new Error( "Unsupport mode: " + Mode );
-
-		/** @type {Components.Vim.Cursor} */
-		this.__cursor = Cursor;
-
-		this.__statusBar = Cursor.Vim.statusBar;
-
-		this.__mode = Mode;
-		this.__hist = new History( ZMap[ Mode ] );
-
-		this.__command = [];
-		this.__currentCommand = null;
-		this.__blinkId = "ExCommandBlinkCycle" + Perf.uuid;
-		this.__curPos = 0;
-
-		var feeder = Cursor.feeder;
-
-		var __blink = false;
-		var __holdBlink = false;
-		this.__blink = function()
-		{
-			__blink = true;
-			__holdBlink = true
-		};
-
-		Cycle.perma( this.__blinkId, function()
-		{
-			if( __holdBlink ) __holdBlink = false;
-			else __blink = !__blink;
-
-			feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
-		}, 600 );
-
-		this.__doBlink = function()
-		{
-			var c = "";
-			var comm = _self.__command;
-			var pos = _self.__curPos;
-			var cLen = comm.length;
-			var faced = true;
-
-			for( var i = 0; i < cLen; i ++ )
-			{
-				var v = comm[i];
-				if( __blink && i == pos )
-				{
-					face = true;
-					v = Cursor.face + v.substr( 1 );
-				}
-
-				c+= v;
-			}
-
-			if( __blink && cLen <= pos )
-			{
-				c += Cursor.face;
-			}
-
-			return c;
-		};
-
-		this.__statusBar.override = this.__doBlink;
-	};
-
-	Command.prototype.dispose = function()
-	{
-		this.__statusBar.override = null;
-
-		Cycle.permaRemove( this.__blinkId );
-		var feeder = this.__cursor.feeder;
-		feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
-	};
-
-	Command.prototype.handler = function( e )
-	{
-		e.preventDefault();
-
-		if( e.ModKeys ) return;
-
-		this.__blink();
-
-		var InputKey = null;
-
-		var histNav = false;
-
-		if( e.kMap( "Tab" ) )
-		{
-			InputKey = "^I";
-		}
-		else if( e.kMap( "C-v" ) )
-		{
-			this.__direct = true;
-		}
-		else if( e.kMap( "BS" ) )
-		{
-			if( this.__curPos == 1 && 1 < this.__command.length )
-				return false;
-
-			this.__command.splice( --this.__curPos, 1 );
-			if( this.__command.length == 0 )
-			{
-				e.cancel();
-				return true;
-			}
-		}
-		else if( e.kMap( "Del" ) )
-		{
-			this.__command.splice( this.__curPos, 1 );
-		}
-		else if( e.kMap( "Enter" ) )
-		{
-			this.__process( e );
-			return true;
-		}
-		else if( e.kMap( "Left" ) )
-		{
-			if( 1 < this.__curPos ) this.__curPos --;
-		}
-		else if( e.kMap( "Right" ) )
-		{
-			if( this.__curPos < this.__command.length )
-				this.__curPos ++;
-		}
-
-		// History stepping
-		else if( histNav = e.kMap( "Up" ) ) // History navigations
-		{
-			if( !this.__currentCommand )
-			{
-				this.__currentCommand = this.__command;
-			}
-
-			var n = this.__hist.prev( this.__currentCommand );
-
-			if( n )
-			{
-				this.__command = n;
-				this.__curPos = n.length;
-			}
-			else
-			{
-				beep();
-			}
-		}
-		else if( histNav = e.kMap( "Down" ) )
-		{
-			var n = this.__hist.next( this.__currentCommand );
-
-			if( n )
-			{
-				this.__command = n;
-				this.__curPos = n.length;
-			}
-			else if( this.__currentCommand )
-			{
-				this.__command = this.__currentCommand;
-				this.__currentCommand = null;
-			}
-
-			else beep();
-		}
-		else
-		{
-			InputKey = e.key;
-		}
-
-		if( InputKey != null )
-		{
-			this.__command.splice( this.__curPos ++, 0, InputKey );
-		}
-
-		if( !histNav )
-		{
-			this.__hist.reset();
-			if( this.__currentCommand ) this.__currentCommand = this.__command;
-		}
-
-		e.cancel();
-
-		var feeder = this.__cursor.feeder;
-		feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
-	};
-
-	Command.prototype.__process = function( e )
-	{
-		this.__hist.push( this.__command );
-
-		var action = "";
-		switch( this.__mode )
-		{
-			case "/":
-				action = "FIND";
-				break;
-			case ":":
-				action = "EDITOR_COMMAND";
-				break;
-		}
-
-		var cur = this.__cursor;
-
-		cur.suppressEvent();
-		this.__cursor.openRunAction( action, e, this.__command.slice() );
-		cur.unsuppressEvent();
-	};
-
-	ns[ NS_EXPORT ]( EX_CLASS, "Command", Command );
-})();
-;BotanJS.define( "Components.Vim.Controls" );(function(){
-	var ns = __namespace( "Components.Vim" );
-
-	/** @type {System.Debug} */
-	var debug = __import( "System.Debug" );
-
-	/** @type {Components.Vim.Ex.Command} */
-	var ExCommand = __import( "Components.Vim.Ex.Command" );
-
-	var beep = ns[ NS_INVOKE ]( "Beep" );
-
-	var SHIFT = 1 << 9;
-	var CTRL = 1 << 10;
-	var ALT = 1 << 11;
-
-	var KEY_SHIFT = 16;
-	var KEY_CTRL = 17;
-	var KEY_ALT = 18;
-
-	var BACKSPACE = 8;
-	var TAB = 9;
-	var ENTER = 13;
-	var DELETE = 46;
-	var SPACE = 32;
-
-	var UP = 38; var DOWN = 40; var LEFT = 37; var RIGHT = 39;
-
-	var _0 = 48; var _1 = 49; var _2 = 50; var _3 = 51; var _4 = 52;
-	var _5 = 53; var _6 = 54; var _7 = 55; var _8 = 56; var _9 = 57;
-
-	var SEMI_COLON = 59; var GECKO_SEMI_COLON = 186;
-
-	var EQUAL = 61; var GECKO_EQUAL = 187;
-
-	var A = 65; var B = 66; var C = 67; var D = 68; var E = 69;
-	var F = 70; var G = 71; var H = 72; var I = 73; var J = 74;
-	var K = 75; var L = 76; var M = 77; var N = 78; var O = 79;
-	var P = 80; var Q = 81; var R = 82; var S = 83; var T = 84;
-	var U = 85; var V = 86; var W = 87; var X = 88; var Y = 89;
-	var Z = 90;
-
-	var S_BRACKET_L = 219; var S_BRACKET_R = 221;
-
-	var ESC = 27;
-
-	var F1 = 112; var F2 = 113; var F3 = 114; var F4 = 115; var F5 = 116;
-	var F6 = 117; var F7 = 118; var F8 = 119; var F9 = 120; var F10 = 121;
-	var F11 = 122; var F12 = 123;
-
-	var DASH = 173; var GECKO_DASH = 189;
-	var COMMA = 188; var FULLSTOP = 190;
-	var SLASH = 191; var BACK_SLASH = 220;
-
-	var QUOTE = 222;
-
-	var ANY_KEY = -1;
-
-	var __maps = {};
-	var Map = function( str )
-	{
-		if( __maps[ str ] ) return __maps[ str ];
-
-		// C-Left, A-Up ...
-		var Code = str.split( "-" );
-		var sCode = Code[0];
-
-		var Mod = 0;
-		if( Code.length == 2 )
-		{
-			var m = true;
-			switch( Code[0] )
-			{
-				case "C": Mod = CTRL; break;
-				case "A": Mod = ALT; break;
-				case "S": Mod = SHIFT; break;
-				default:
-					m = false;
-			}
-
-			if( m )
-			{
-				sCode = Code[1];
-			}
-		}
-
-		var kCode;
-		switch( sCode )
-		{
-			case "BS": kCode = Mod + BACKSPACE; break;
-			case "Del": kCode = Mod + DELETE; break;
-			case "Enter": kCode = Mod + ENTER; break;
-			case "Tab": kCode = Mod + TAB; break;
-
-			case "Up": kCode = Mod + UP; break;
-			case "Down": kCode = Mod + DOWN; break;
-			case "Left": kCode = Mod + LEFT; break;
-			case "Right": kCode = Mod + RIGHT; break;
-
-			case "A": Mod = SHIFT; case "a": kCode = Mod + A; break;
-			case "B": Mod = SHIFT; case "b": kCode = Mod + B; break;
-			case "C": Mod = SHIFT; case "c": kCode = Mod + C; break;
-			case "D": Mod = SHIFT; case "d": kCode = Mod + D; break;
-			case "E": Mod = SHIFT; case "e": kCode = Mod + E; break;
-			case "F": Mod = SHIFT; case "f": kCode = Mod + F; break;
-			case "G": Mod = SHIFT; case "g": kCode = Mod + G; break;
-			case "H": Mod = SHIFT; case "h": kCode = Mod + H; break;
-			case "I": Mod = SHIFT; case "i": kCode = Mod + I; break;
-			case "J": Mod = SHIFT; case "j": kCode = Mod + J; break;
-			case "K": Mod = SHIFT; case "k": kCode = Mod + K; break;
-			case "L": Mod = SHIFT; case "l": kCode = Mod + L; break;
-			case "M": Mod = SHIFT; case "m": kCode = Mod + M; break;
-			case "N": Mod = SHIFT; case "n": kCode = Mod + N; break;
-			case "O": Mod = SHIFT; case "o": kCode = Mod + O; break;
-			case "P": Mod = SHIFT; case "p": kCode = Mod + P; break;
-			case "Q": Mod = SHIFT; case "q": kCode = Mod + Q; break;
-			case "R": Mod = SHIFT; case "r": kCode = Mod + R; break;
-			case "S": Mod = SHIFT; case "s": kCode = Mod + S; break;
-			case "T": Mod = SHIFT; case "t": kCode = Mod + T; break;
-			case "U": Mod = SHIFT; case "u": kCode = Mod + U; break;
-			case "V": Mod = SHIFT; case "v": kCode = Mod + V; break;
-			case "W": Mod = SHIFT; case "w": kCode = Mod + W; break;
-			case "X": Mod = SHIFT; case "x": kCode = Mod + X; break;
-			case "Y": Mod = SHIFT; case "y": kCode = Mod + Y; break;
-			case "Z": Mod = SHIFT; case "z": kCode = Mod + Z; break;
-
-			case "!": Mod = SHIFT; case "1": kCode = Mod + _1; break;
-			case "@": Mod = SHIFT; case "2": kCode = Mod + _2; break;
-			case "#": Mod = SHIFT; case "3": kCode = Mod + _3; break;
-			case "$": Mod = SHIFT; case "4": kCode = Mod + _4; break;
-			case "%": Mod = SHIFT; case "5": kCode = Mod + _5; break;
-			case "^": Mod = SHIFT; case "6": kCode = Mod + _6; break;
-			case "&": Mod = SHIFT; case "7": kCode = Mod + _7; break;
-			case "*": Mod = SHIFT; case "8": kCode = Mod + _8; break;
-			case "(": Mod = SHIFT; case "9": kCode = Mod + _9; break;
-			case ")": Mod = SHIFT; case "0": kCode = Mod + _0; break;
-			case "<": Mod = SHIFT; case ",": kCode = Mod + COMMA; break;
-			case ">": Mod = SHIFT; case ".": kCode = Mod + FULLSTOP; break;
-
-			default:
-				throw new Error( "Unsupport keys: " + str );
-		}
-
-		return __maps[ str ] = kCode;
-	};
-
-	// Polyfill for Chrome < 51
-	var RMap = function( kCode )
-	{
-		switch( kCode )
-		{
-			case SPACE: return " ";
-			case A: return "a"; case B: return "b"; case C: return "c"; case D: return "d";
-			case E: return "e"; case F: return "f"; case G: return "g"; case H: return "h";
-			case I: return "i"; case J: return "j"; case K: return "k"; case L: return "l";
-			case M: return "m"; case N: return "n"; case O: return "o"; case P: return "p";
-			case Q: return "q"; case R: return "r"; case S: return "s"; case T: return "t";
-			case U: return "u"; case V: return "v"; case W: return "w"; case X: return "x";
-			case Y: return "y"; case Z: return "z";
-			case _1: return "1"; case _2: return "2"; case _3: return "3";
-			case _4: return "4"; case _5: return "5"; case _6: return "6"; case _7: return "7";
-			case _8: return "8"; case _9: return "9"; case _0: return "0";
-
-			case S_BRACKET_L: return "["; case S_BRACKET_R: return "]";
-			case SEMI_COLON: case GECKO_SEMI_COLON: return ";";
-			case QUOTE: return "'"; case COMMA: return ",";
-			case FULLSTOP: return "."; case SLASH: return "/"; case BACK_SLASH: return "\\";
-			case DASH: case GECKO_DASH: return "-"; case EQUAL: case GECKO_EQUAL: return "=";
-
-			case SHIFT + _1: return "!"; case SHIFT + _2: return "@"; case SHIFT + _3: return "#";
-			case SHIFT + _4: return "$"; case SHIFT + _5: return "%"; case SHIFT + _6: return "^";
-			case SHIFT + _7: return "&"; case SHIFT + _8: return "*"; case SHIFT + _9: return "(";
-			case SHIFT + _0: return ")";
-
-			case SHIFT + S_BRACKET_L: return "{"; case SHIFT + S_BRACKET_R: return "}";
-			case SHIFT + SEMI_COLON: case SHIFT + GECKO_SEMI_COLON: return ":";
-			case SHIFT + QUOTE: return "\"";
-			case SHIFT + COMMA: return "<"; case SHIFT + FULLSTOP: return ">";
-			case SHIFT + SLASH: return "?"; case SHIFT + BACK_SLASH: return "|";
-			case SHIFT + DASH: case SHIFT + GECKO_DASH: return "_";
-			case SHIFT + EQUAL: case SHIFT + GECKO_EQUAL: return "+";
-
-			case SHIFT + A: return "A"; case SHIFT + B: return "B"; case SHIFT + C: return "C";
-			case SHIFT + D: return "D"; case SHIFT + E: return "E"; case SHIFT + F: return "F";
-			case SHIFT + G: return "G"; case SHIFT + H: return "H"; case SHIFT + I: return "I";
-			case SHIFT + J: return "J"; case SHIFT + K: return "K"; case SHIFT + L: return "L";
-			case SHIFT + M: return "M"; case SHIFT + N: return "N"; case SHIFT + O: return "O";
-			case SHIFT + P: return "P"; case SHIFT + Q: return "Q"; case SHIFT + R: return "R";
-			case SHIFT + S: return "S"; case SHIFT + T: return "T"; case SHIFT + U: return "U";
-			case SHIFT + V: return "V"; case SHIFT + W: return "W"; case SHIFT + X: return "X";
-			case SHIFT + Y: return "Y"; case SHIFT + Z: return "Z";
-			case ESC: return "Escape"; case BACKSPACE: return "Backspace"; case DELETE: return "Delete";
-			case SHIFT: return "Shift"; case ALT: return "Alt"; case CTRL: return "Control";
-			case ENTER: return "Enter"; case TAB: return "Tab";
-		}
-
-		return "?";
-	};
-
-	var Controls = function( vimArea )
-	{
-		/** @type {Components.Vim.VimArea} */
-		this.__vimArea = vimArea
-
-		this.__cfeeder = vimArea.contentFeeder;
-		this.__sfeeder = vimArea.statusFeeder;
-
-		this.__ccur = this.__cfeeder.cursor;
-
-		// Dived composite command handler
-		// Has full control of the key input, except Esc
-		this.__divedCCmd = null;
-	};
-
-	Controls.prototype.__composite = function( e, handler )
-	{
-		if( handler )
-		{
-			if( !this.__compositeReg ) this.__compositeReg = [];
-			this.__compositeReg.push({
-				keys: Array.prototype.slice.call( arguments, 2 )
-				, handler: handler
-				, i: 0
-			});
-			return true;
-		}
-
-		var kCode = e.keyCode;
-
-		for( var i = 0; i < this.__compositeReg.length; i ++ )
-		{
-			var compReg = this.__compositeReg[i];
-			var keys = compReg.keys;
-			var key = keys[ compReg.i ++ ];
-
-			if( key == ANY_KEY || key == kCode )
-			{
-				if( compReg.i == keys.length )
-				{
-					this.__compositeReg = null;
-					compReg.handler( e );
-				}
-
-				return true;
-			}
-		}
-
-		if( this.__compositeReg ) beep();
-		this.__compositeReg = null;
-		return false;
-	};
-
-	Controls.prototype.__actionCommand = function( e )
-	{
-		var ActionHandled = true;
-		var ccur = this.__ccur;
-
-		// Action Command
-		switch( e.keyCode )
-		{
-			case SHIFT + A: // Append at the line end
-				ccur.lineEnd();
-				ccur.moveX( 1, false, true, true );
-				ccur.openAction( "INSERT", e );
-				break;
-			case I: // Insert
-				if( 0 < ccur.X )
-				{
-					ccur.moveX( -1, true );
-					ccur.moveX( 1, true, true, true );
-				}
-				ccur.openAction( "INSERT", e );
-				break;
-			case A: // Append
-				ccur.fixTab();
-				ccur.moveX( 1, false, true, true );
-				ccur.openAction( "INSERT", e );
-				break;
-			case SHIFT + I: // Append at line start
-				ccur.lineStart( true );
-				ccur.openAction( "INSERT", e );
-				break;
-
-			case S: // Delete Char and start insert
-				if( ccur.getLine().content != "" )
-				{
-					ccur.openRunAction( "DELETE", e, ccur.aPos );
-				}
-				ccur.openAction( "INSERT", e );
-				break;
-
-			case SHIFT + O: // new line before insert
-				ccur.lineStart();
-				ccur.openAction( "INSERT", e );
-				ccur.action.handler( new ActionEvent( e.sender, "Enter" ) );
-				ccur.moveY( -1 );
-				break;
-			case O: // new line insert
-				ccur.lineEnd( true );
-				ccur.openAction( "INSERT", e );
-				ccur.action.handler( new ActionEvent( e.sender, "Enter" ) );
-				break;
-
-			case U: // Undo
-				ccur.openRunAction( "UNDO", e );
-				break;
-			case CTRL + R: // Redo
-				ccur.openRunAction( "REDO", e );
-				break;
-
-			case D: // Del with motion
-				ccur.openAction( "DELETE", e );
-				break;
-			case Y: // Yank with motion
-				ccur.openAction( "YANK", e );
-				break;
-
-			case P: // Put
-				ccur.suppressEvent();
-				ccur.moveX( 1, false, true );
-				ccur.unsuppressEvent();
-			case SHIFT + P: // Put before
-				ccur.openRunAction( "PUT", e );
-				break;
-
-			case SHIFT + X: // Delete before
-				if( !this.__cMoveX( -1 ) ) break;
-			case X: // Del
-				if( ccur.getLine().content == "" )
-				{
-					beep();
-					break;
-				}
-				ccur.openRunAction( "DELETE", e, ccur.aPos );
-				break;
-			case SHIFT + U: // Undo previous changes in oneline
-				break;
-			case SHIFT + I: // Append before the line start, after spaces
-				break;
-			case SHIFT + J: // Join lines
-				ccur.openRunAction( "JOIN_LINES", e );
-				break;
-			case SHIFT + K: // Find the manual entry
-				break;
-
-			case V: // Visual
-			case SHIFT + V: // Visual line
-				ccur.openAction( "VISUAL", e );
-				ccur.action.handler( e );
-				break;
-
-			case SHIFT + SEMI_COLON: // ":" Command line
-			case SHIFT + GECKO_SEMI_COLON:
-				this.__divedCCmd = new ExCommand( ccur, ":" );
-				this.__divedCCmd.handler( e );
-				break;
-
-			case SHIFT + COMMA: // <
-			case SHIFT + FULLSTOP: // >
-				ccur.openAction( "SHIFT_LINES", e );
-				break;
-
-			case F1: // F1, help
-				break;
-			default:
-				ActionHandled = false;
-		}
-
-		return ActionHandled;
-	};
-
-	Controls.prototype.__cMoveX = function( a, b, c )
-	{
-		var ccur = this.__ccur;
-
-		var x = ccur.X;
-		var y = ccur.Y;
-		ccur.moveX( a, b, c || ccur.pSpace );
-		if( ccur.X == x && ccur.Y == y )
-		{
-			beep();
-			return false;
-		}
-		return true;
-	};
-
-	Controls.prototype.__cMoveY = function( a )
-	{
-		var ccur = this.__ccur;
-		var cfeeder = this.__cfeeder;
-
-		var y = ccur.Y + cfeeder.panY;
-		ccur.moveY( a );
-		if( y == ( ccur.Y + cfeeder.panY ) )
-		{
-			if( 0 < a && !cfeeder.EOF ) return true;
-			beep();
-		}
-
-		return false;
-	};
-
-	Controls.prototype.__modCommand = function( e )
-	{
-		if( this.__mod )
-		{
-			e.preventDefault();
-			this.__composite( e );
-			return;
-		}
-
-		var _self = this;
-		var mod = true;
-
-		var cur = this.__cursor;
-		switch( e.keyCode )
-		{
-			case SHIFT + QUOTE:
-				this.__composite( e, function( e2 ) {
-					e2.target.registers.select( e2.key );
-					e2.cancel();
-
-					_self.__mod = false;
-				}, ANY_KEY );
-				break;
-			case _0: // No 0 for first count
-				if( !this.__compositeReg )
-				{
-					mod = false;
-					break;
-				}
-			case _1: case _2: case _3: case _4:
-			case _5: case _6: case _7: case _8: case _9:
-
-				var Count = e.key;
-				var recurNum = function( e )
-				{
-					var intercept = e.ModKeys;
-					switch( e.keyCode )
-					{
-						case _0: case _1: case _2:
-						case _3: case _4: case _5:
-						case _6: case _7: case _8: case _9:
-							Count += e.key;
-							intercept = true;
-					}
-
-					if( intercept )
-					{
-						_self.__composite( e, recurNum, ANY_KEY );
-						e.cancel();
-						return;
-					}
-
-					e.__count = Number( Count );
-					debug.Info( "Count is: " + Count );
-					_self.__mod = false;
-				};
-
-				this.__composite( e, recurNum, ANY_KEY );
-				break;
-			default:
-				mod = false;
-		}
-
-		this.__mod = mod;
-		if( mod )
-		{
-			e.cancel();
-		}
-	};
-
-	Controls.prototype.__cursorCommand = function( e )
-	{
-		var kCode = e.keyCode;
-
-		if( this.__cMovement )
-		{
-			if( !e.ModKeys )
-			{
-				this.__composite( e );
-				this.__cMovement = false;
-				return true;
-			}
-		}
-
-		var ccur = this.__ccur;
-		var vima = this.__vimArea;
-		var cfeeder = ccur.feeder;
-
-		var cursorHandled = true;
-		switch( kCode )
-		{
-			case BACKSPACE: this.__cMoveX( -1, true ); break; // Backspace, go back 1 char
-			case H: this.__cMoveX( - e.count ); break; // Left
-			case L: this.__cMoveX( e.count ); break; // Right
-			case DASH: case GECKO_DASH:
-			case K: this.__cMoveY( - e.count ); break; // Up
-			case ENTER:
-			case J: this.__cMoveY( e.count ); break; // Down
-
-			case CTRL + F: // Page Down
-				if( cfeeder.firstBuffer.nextLine.placeholder )
-				{
-					beep();
-					break;
-				}
-
-				var oPan = cfeeder.panY;
-				cfeeder.pan( undefined, cfeeder.moreAt );
-				cfeeder.softReset();
-
-				ccur.moveY( -ccur.Y );
-
-				break;
-			case CTRL + B: // Page Up
-				if( cfeeder.panY == 0 )
-				{
-					beep();
-					break;
-				}
-				cfeeder.pan( undefined, -cfeeder.moreAt );
-				cfeeder.softReset();
-
-				ccur.moveY( -ccur.Y );
-				if( !cfeeder.EOF ) ccur.moveY( cfeeder.moreAt );
-				break;
-
-			case SHIFT + H: // First line buffer
-				break;
-			case SHIFT + L: // Last line buffer
-				break;
-
-			case _0: // Really line Start
-				ccur.lineStart();
-				break;
-			case SHIFT + _6: // ^, line Start at word
-				ccur.lineStart( true );
-				break;
-			case SHIFT + _4: // $, End
-				ccur.lineEnd( ccur.pSpace );
-				break;
-			case SHIFT + G: // Goto last line
-				ccur.moveY( Number.MAX_VALUE );
-				ccur.moveX( Number.MAX_VALUE, true );
-				break
-
-			case SHIFT + _5: // %, Find next item
-				var analyzer = this.__vimArea.contentAnalyzer;
-
-				/** @type {Components.Vim.Syntax.TokenMatch} */
-				var bracketMatch = analyzer.bracketAt( ccur.aPos );
-
-				if( bracketMatch.open == -1 )
-				{
-					beep();
-					break;
-				}
-
-				ccur.moveTo(
-					bracketMatch.selected == bracketMatch.close
-						? bracketMatch.open
-						: bracketMatch.close
-				);
-
-				break;
-
-
-			case SHIFT + T: // To
-			case T: // To
-				this.__cMovement = true;
-
-				this.__composite( e, function( e2 ) {
-					var oX = ccur.X;
-					ccur.openRunAction( "TO", e, e2 );
-
-					if( ccur.X < oX )
-					{
-						ccur.moveX( 1 );
-					}
-					else if( oX < ccur.X )
-					{
-						ccur.moveX( -1 );
-					}
-				}, ANY_KEY );
-
-				break;
-			case SHIFT + F: // To
-			case F: // To
-				this.__cMovement = true;
-
-				this.__composite( e, function( e2 ) {
-					ccur.openRunAction( "TO", e, e2 );
-				}, ANY_KEY );
-
-				break;
-
-			case W: // word
-			case SHIFT + W:
-			case B:
-			case SHIFT + B:
-				ccur.openRunAction( "WORD", e );
-				break
-
-
-			case I: // In between boundary
-				if( !ccur.action )
-				{
-					cursorHandled = false;
-					break;
-				}
-
-				var analyzer = this.__vimArea.contentAnalyzer;
-
-				this.__cMovement = true;
-
-				// Word boundary
-				this.__composite( e, function( e2 ) {
-					var WordMatch = analyzer.wordAt( ccur.aPos );
-					e2.__range = WordMatch;
-				}, W );
-
-				var bracket = function( e2 ) {
-					var BracketMatch = analyzer.bracketIn( "(", ccur.aPos );
-					e2.__range = BracketMatch;
-				};
-				var curlyBracket = function( e2 ) {
-					var BracketMatch = analyzer.bracketIn( "{", ccur.aPos );
-					e2.__range = BracketMatch;
-				};
-				var squareBracket = function( e2 ) {
-					var BracketMatch = analyzer.bracketIn( "[", ccur.aPos );
-					e2.__range = BracketMatch;
-				};
-				var singleQuote = function( e2 ) {
-					var BracketMatch = analyzer.quoteIn( "'", ccur.aPos );
-					e2.__range = BracketMatch;
-				};
-				var doubleQuote = function( e2 ) {
-					var BracketMatch = analyzer.quoteIn( "\"", ccur.aPos );
-					e2.__range = BracketMatch;
-				};
-
-				// Bracket boundaries
-				this.__composite( e, bracket, SHIFT + _0 );
-				this.__composite( e, bracket, SHIFT + _9 );
-				this.__composite( e, squareBracket, S_BRACKET_L );
-				this.__composite( e, squareBracket, S_BRACKET_R );
-				this.__composite( e, curlyBracket, SHIFT + S_BRACKET_L );
-				this.__composite( e, curlyBracket, SHIFT + S_BRACKET_R );
-
-				// Quote boundaries
-				this.__composite( e, singleQuote, QUOTE );
-				this.__composite( e, doubleQuote, SHIFT + QUOTE );
-				break;
-
-			case G:
-
-				this.__cMovement = true;
-
-				// Go to top
-				this.__composite( e, function() {
-					ccur.moveY( -Number.MAX_VALUE );
-					ccur.moveX( -Number.MAX_VALUE, true );
-				}, G );
-
-				// Print Hex
-				this.__composite( e, function() {
-					ccur.openRunAction( "PRINT_HEX", e );
-				}, _8 );
-
-				// to lowercase
-				this.__composite( e, function( e2 ) {
-					if( ccur.action ) { beep(); return; }
-					// TODO
-				}, U );
-
-				// to uppercase
-				this.__composite( e, function( e2 ) {
-					if( ccur.action ) { beep(); return; }
-					// TODO
-				}, SHIFT + U );
-				break;
-
-			case SHIFT + N: // Next Search
-			case N: // Next Search
-				ccur.openRunAction( "FIND", e );
-				break;
-
-			case SLASH: // "/" Search movement
-				this.__cMovement = true;
-
-				this.__divedCCmd = new ExCommand( ccur, "/" );
-				this.__divedCCmd.handler( e );
-				break;
-			default:
-				cursorHandled = false;
-		}
-
-		return cursorHandled;
-	};
-
-	/**
-	 * sender @param  {Components.Vim.VimArea}
-	 * e @param {Components.Vim.Controls.ActionEvent}
-	 * */
-	Controls.prototype.handler = function( sender, e )
-	{
-		// Never capture these keys
-		if( e.keyCode == ( ALT + D )
-			// F2 - F12
-			|| ( F1 < e.keyCode && e.keyCode <= F12 )
-		) return;
-
-		// Clear composite command
-		if( e.Escape )
-		{
-			var b = false;
-			this.__cMovement = false;
-
-			if( this.__compositeReg )
-			{
-				b = true;
-				this.__compositeReg = null;
-			}
-			else if( this.__divedCCmd )
-			{
-				b = true;
-				this.__divedCCmd.dispose();
-				this.__divedCCmd = null;
-			}
-
-			if( b )
-			{
-				beep();
-				return;
-			}
-		}
-
-		if( this.__divedCCmd )
-		{
-			if( this.__divedCCmd.handler( e ) )
-			{
-				this.__divedCCmd.dispose();
-				this.__cMovement = false;
-				this.__divedCCmd = null;
-				return;
-			}
-
-			if( e.canceled ) return;
-		}
-
-		var cfeeder = this.__cfeeder;
-		var ccur = this.__ccur;
-
-		if( !this.__cMovement && ( !ccur.action || ccur.action.allowMovement ) )
-		{
-			this.__modCommand( e );
-			if( e.canceled ) return;
-		}
-
-		var kCode = e.keyCode;
-
-		// Action commands are handled by the actions themselves
-		if( ccur.action )
-		{
-			if( e.Escape )
-			{
-				e.preventDefault();
-				ccur.closeAction();
-			}
-			else
-			{
-				if( ccur.action.allowMovement )
-				{
-					var SubCommand = !this.__compositeReg;
-					this.__cursorCommand( e, kCode );
-					if( SubCommand && this.__compositeReg )
-					{
-						e.preventDefault();
-						return;
-					}
-				}
-
-				if( ccur.action.handler( e ) )
-				{
-					ccur.closeAction();
-				}
-			}
-			return;
-		}
-
-		e.preventDefault();
-
-		if( this.__cursorCommand( e ) ) return;
-		if( this.__actionCommand( e ) ) return;
-	};
-
-	var ActionEvent = function( sender, e )
-	{
-		this.__target = sender;
-		this.__canceled = false;
-
-		if( typeof( e ) == "string" )
-		{
-			this.__key = e;
-			this.__modKeys = 0;
-			this.__kCode = Map( e );
-			this.__escape = this.__kCode == ESC;
-		}
-		else
-		{
-			this.__e = e;
-
-			// KeyCode HotFix
-			if( e.key == ";" || e.key == ":" )
-			{
-				SEMI_COLON = e.keyCode;
-			}
-
-			var c = this.__e.keyCode;
-
-			this.__escape = c == ESC || ( e.ctrlKey && c == C );
-			this.__kCode = c
-				+ ( e.shiftKey || e.getModifierState( "CapsLock" ) ? SHIFT : 0 )
-				+ ( e.ctrlKey ? CTRL : 0 )
-				+ ( e.altKey ? ALT : 0 );
-
-			this.__modKeys = c == KEY_SHIFT || c == KEY_CTRL || c == KEY_ALT;
-			this.__key = e.key || RMap( this.__kCode );
-		}
-
-		this.__count = 1;
-		this.__range = null;
-	};
-
-	__readOnly( ActionEvent.prototype, "target", function() { return this.__target; } );
-	__readOnly( ActionEvent.prototype, "key", function() { return this.__key; } );
-	__readOnly( ActionEvent.prototype, "keyCode", function() { return this.__kCode; } );
-	__readOnly( ActionEvent.prototype, "ModKeys", function() { return this.__modKeys; } );
-	__readOnly( ActionEvent.prototype, "Escape", function() { return this.__escape; } );
-	__readOnly( ActionEvent.prototype, "canceled", function() { return this.__canceled; } );
-
-	__readOnly( ActionEvent.prototype, "range", function() {
-
-		/** @type {Components.Vim.Syntax.TokenMatch} */
-		var r = this.__range;
-
-		if( r && r.open == -1 && r.close == -1 )
-		{
-			return null;
-		}
-
-		return r;
-	} );
-
-	__readOnly( ActionEvent.prototype, "count", function() {
-		return this.__count;
-	} );
-
-	ActionEvent.prototype.kMap = function( map )
-	{
-		return this.__kCode == Map( map );
-	};
-
-	ActionEvent.prototype.cancel = function()
-	{
-		this.preventDefault();
-		this.__canceled = true;
-	};
-
-	ActionEvent.prototype.preventDefault = function()
-	{
-		if( this.__e ) this.__e.preventDefault();
-	};
-
-	ns[ NS_EXPORT ]( EX_CLASS, "Controls", Controls );
-	ns[ NS_EXPORT ]( EX_CLASS, "ActionEvent", ActionEvent );
-})();
 ;BotanJS.define( "Components.Vim.VimArea" );(function(){
 	var ns = __namespace( "Components.Vim" );
 
@@ -8023,7 +8157,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	var VimControls = ns[ NS_INVOKE ]( "Controls" );
 	var ActionEvent = ns[ NS_INVOKE ]( "ActionEvent" );
-	var mesg = ns[ NS_INVOKE ]( "Message" );
+	var Mesg = ns[ NS_INVOKE ]( "Message" );
 
 	var Insts = [];
 	var InstIndex = 0;
@@ -8045,6 +8179,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	var VimArea = function( stage, detectScreenSize )
 	{
 		if( !stage ) throw new Error( "Invalid argument" );
+
+		EventDispatcher.call( this );
 
 		stage = IDOMElement( stage );
 
@@ -8084,11 +8220,11 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		if( detectScreenSize )
 		{
 			var val = element.value;
-			this.__testScreen(function() { _self.VisualizeVimFrame( val ); });
+			this.__testScreen(function() { _self.__visualize( val ); });
 		}
 		else
 		{
-			this.VisualizeVimFrame( element.value );
+			this.__visualize( element.value );
 		}
 
 		// Set buffer index
@@ -8097,6 +8233,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		// Push this instance
 		Insts[ this.__instIndex ] = this;
 	};
+
+	__extends( VimArea, EventDispatcher );
 
 	VimArea.prototype.__testScreen = function( handler )
 	{
@@ -8172,7 +8310,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		}
 	};
 
-	VimArea.prototype.VisualizeVimFrame = function( content )
+	// Visualize the Vim Frame
+	VimArea.prototype.__visualize = function( content )
 	{
 		var _self = this;
 		this.content = content;
@@ -8204,7 +8343,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		// Set the stamps
 		var statusBar = new StatusBar( c );
 		statusBar.stamp( -18, function(){ return cfeeder.lineStat; } );
-		statusBar.stamp( -3, function(){ return mesg( cfeeder.docPos ); } );
+		statusBar.stamp( -3, function(){ return Mesg( cfeeder.docPos ); } );
 		statusBar.stamp( 0, function(){ return cfeeder.cursor.message; } );
 
 		sfeeder.init( statusBar.statusText );
@@ -8258,6 +8397,95 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		);
 
 		this.stage.addEventListeners( this.__stagedEvents );
+		this.dispatchEvent( new BotanEvent( "Visualized" ) );
+	};
+
+	VimArea.prototype.display = function( data, handler )
+	{
+		var _self = this;
+		var stage = this.stage;
+		var cursor = this.__cursor;
+
+		var evts = this.__stagedEvents;
+		for( var i in evts ) stage.removeEventListener( evts[ i ] );
+		cursor.suppressEvent();
+		this.__active = false;
+
+		stage.removeAttribute( "data-vimarea" );
+		setTimeout( function() {
+			stage.element.value = data;
+			if( handler ) handler();
+		}, 100 );
+
+		var ContinueEdit = new EventKey( "KeyDown", function( e ) {
+			var evt = new ActionEvent( _self, e );
+			if( evt.kMap( "Escape" ) )
+			{
+				stage.removeEventListener( ContinueEdit );
+				stage.setAttribute( new DataKey( "vimarea", 1 ) );
+				stage.addEventListeners( _self.__stagedEvents );
+				cursor.unsuppressEvent();
+				cursor.feeder.dispatcher.dispatchEvent( new BotanEvent( "VisualUpdate" ) );
+				_self.__active = true;
+				stage.element.focus();
+			}
+		} );
+
+		stage.addEventListener( ContinueEdit );
+	};
+
+	VimArea.prototype.demo = function( seq )
+	{
+		if( this.__demoActive ) return;
+
+		var _self = this;
+
+		this.__demoActive = true;
+		var l = seq.length;
+
+		var s = 0;
+
+		var controls = new VimControls( this );
+		var cursor = this.__cursor;
+		var statusBar = this.statusBar;
+
+		var demoEnd = function()
+		{
+			statusBar.stamp( 1, false );
+			controls.handler( _self, new ActionEvent( _self, "Escape" ) );
+			setTimeout( function() {
+				cursor.openRunAction( "VA_REC", undefined, true );
+				_self.__demoActive = false;
+				_self.stage.addEventListeners( _self.__stagedEvents );
+			}, 100 );
+		};
+
+		var demoChain = function()
+		{
+			_self.stage.element.focus();
+
+			var key = seq[ s + 1 ];
+			controls.handler( _self, new ActionEvent( _self, key ) );
+			s += 2;
+
+			if( s < l )
+			{
+				// Wait time cannot be 0
+				setTimeout( demoChain, seq[ s ] || 20 );
+			}
+			else
+			{
+				setTimeout( demoEnd, 100 );
+			}
+		};
+
+		statusBar.stamp( 1, function(){ return Mesg( "VA_REC_REPLAY" ); } );
+
+		var evts = this.__stagedEvents;
+		for( var i in evts ) this.stage.removeEventListener( evts[ i ] );
+		this.__active = true;
+
+		setTimeout( demoChain, seq[ s ] );
 	};
 
 	VimArea.prototype.dispose = function()
@@ -8271,6 +8499,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		debug.Info( "Destroy instance: " + id );
 
 		feeder.dispatcher.removeEventListener( "VisualUpdate", this.__visualUpdate );
+		this.dispatchEvent( new BotanEvent( "Dispose" ) );
 
 		stage.removeAttribute( "data-vimarea" );
 
