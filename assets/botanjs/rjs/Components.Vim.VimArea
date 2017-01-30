@@ -1528,7 +1528,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	ns[ NS_EXPORT ]( EX_CLASS, "Registers", Registers );
 
 })();
-;BotanJS.define( "Components.Vim" );var VIMRE_VERSION = "1.0.0";
+;BotanJS.define( "Components.Vim" );var VIMRE_VERSION = "1.0.1";
 (function(){
 	var ns = __namespace( "Components.Vim" );
 
@@ -3707,9 +3707,10 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	Controls.prototype.__composite = function( e, handler )
 	{
+		if( !this.__compositeReg ) this.__compositeReg = [];
+
 		if( handler )
 		{
-			if( !this.__compositeReg ) this.__compositeReg = [];
 			this.__compositeReg.push({
 				keys: Array.prototype.slice.call( arguments, 2 )
 				, handler: handler
@@ -3802,6 +3803,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 				break;
 
 			case D: // Del with motion
+			case C: // Then insert
 				ccur.openAction( "DELETE", e );
 				break;
 			case Y: // Yank with motion
@@ -3998,7 +4000,6 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 					break;
 				}
 
-				var oPan = cfeeder.panY;
 				cfeeder.pan( undefined, cfeeder.moreAt );
 				cfeeder.softReset();
 
@@ -4017,10 +4018,53 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 				ccur.moveY( -ccur.Y );
 				if( !cfeeder.EOF ) ccur.moveY( cfeeder.moreAt );
 				break;
+			case CTRL + E: // Pan Y, Scroll Down
+				cfeeder.pan( undefined, 1 );
+				cfeeder.softReset();
+
+				ccur.moveY( 0 < ccur.Y ? -1 : 0 );
+				ccur.moveX();
+				break;
+			case CTRL + Y: // Pan Y, Scroll Up
+				if( cfeeder.panY == 0 )
+				{
+					beep();
+					break;
+				}
+
+				cfeeder.pan( undefined, -1 );
+				cfeeder.softReset();
+
+				ccur.moveY( ccur.Y == cfeeder.moreAt ? 0 : 1 );
+				ccur.moveX();
+				break;
+			case CTRL + D: // Page Down, keep cursor.Y
+				cfeeder.pan( undefined, cfeeder.moreAt );
+				cfeeder.softReset();
+				ccur.moveY( 0 );
+				break;
+			case CTRL + U: // Page Up, keep cursor.Y
+				if( cfeeder.panY == 0 )
+				{
+					beep();
+					break;
+				}
+				cfeeder.pan( undefined, -cfeeder.moreAt );
+				cfeeder.softReset();
+				ccur.moveY( 0 );
+				break;
 
 			case SHIFT + H: // First line buffer
+				ccur.moveY( -ccur.Y );
+				ccur.lineStart( true );
+				break;
+			case SHIFT + M: // Middle line buffer
+				ccur.moveY( Math.floor( 0.5 * cfeeder.moreAt ) - ccur.Y );
+				ccur.lineStart( true );
 				break;
 			case SHIFT + L: // Last line buffer
+				ccur.moveY( cfeeder.moreAt - ccur.Y );
+				ccur.lineStart( true );
 				break;
 
 			case _0: // Really line Start
@@ -4091,6 +4135,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			case SHIFT + W:
 			case B:
 			case SHIFT + B:
+			case E:
+			case SHIFT + E:
 				ccur.openRunAction( "WORD", e );
 				break
 
@@ -4155,6 +4201,46 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 					ccur.moveY( -Number.MAX_VALUE );
 					ccur.moveX( -Number.MAX_VALUE, true );
 				}, G );
+
+				// Wordwrap next display line
+				this.__composite( e, function() {
+					var dispLine = ccur.getLine( true );
+					ccur.moveX( dispLine.content.length + 1 );
+				}, J );
+
+				// Wordwrap prev display line
+				this.__composite( e, function() {
+					var dispLine = ccur.getLine( true ).prev;
+					var thisLine = ccur.getLine().lineNum;
+
+					if( !dispLine )
+					{
+						ccur.lineStart();
+						beep();
+						return;
+					}
+
+					if( dispLine.content != "" && dispLine.lineNum == thisLine )
+					{
+						ccur.moveX( -( dispLine.content.length + 1 ) );
+					}
+					else
+					{
+						ccur.moveY( -1 );
+						var lines = ccur.getLine().visualLines;
+						if( 1 < lines.length )
+						{
+							var l = lines.length - 1;
+							var j = 0;
+							for( var i = 0; i < l; i ++ )
+							{
+								j += lines[i].content.length;
+							}
+							j += Math.max( 0, Math.floor( j / dispLine.cols ) - 1 );
+							ccur.moveX( j );
+						}
+					}
+				}, K );
 
 				// Print Hex
 				this.__composite( e, function() {
@@ -4305,7 +4391,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			this.__key = RMap( e );
 			this.__modKeys = 0;
 			this.__kCode = e;
-			this.__escape = this.__kCode == ESC || this.__kCode == ( CTRL + C );
+			this.__escape = this.__kCode == ESC || this.__kCode == ( CTRL + C ) || this.__key == ( CTRL + S_BRACKET_L );
 		}
 		else
 		{
@@ -4319,7 +4405,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 			var c = this.__e.keyCode;
 
-			this.__escape = c == ESC || ( e.ctrlKey && c == C );
+			this.__escape = c == ESC || ( e.ctrlKey && ( c == C || c == S_BRACKET_L ) );
 			this.__kCode = c
 				+ ( e.shiftKey || e.getModifierState( "CapsLock" ) ? SHIFT : 0 )
 				+ ( e.ctrlKey ? CTRL : 0 )
@@ -4769,13 +4855,17 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	var occurence = __import( "System.utils.Perf.CountSubstr" );
 
 	/** @type {Components.Vim.IAction} */
-	var DELETE = function( Cursor )
+	var DELETE = function( Cursor, e )
 	{
 		/** @type {Components.Vim.Cursor} */
 		this.__cursor = Cursor;
 		this.__nline = 0;
 		this.__startX = Cursor.aPos;
 		this.__panY = this.__cursor.feeder.panY;
+
+		this.__cMode = e.kMap( "c" );
+		this.__cMode_c = false;
+		this.__enterEvent = e;
 
 		Cursor.suppressEvent();
 	};
@@ -4784,7 +4874,26 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	DELETE.prototype.dispose = function()
 	{
-		this.__cursor.unsuppressEvent();
+		var cur = this.__cursor;
+		cur.unsuppressEvent();
+
+		if( this.__cMode )
+		{
+			if( this.__cMode_c ) // Append, a
+			{
+				cur.fixTab();
+				cur.moveX( 1, false, true, true );
+			}
+			else // Insert, i
+			{
+				cur.moveX( -1, true );
+				cur.moveX( 1, true, true, true );
+			}
+
+			setTimeout( function() {
+				cur.openAction( "INSERT", this.__enterEvent );
+			}, 20 );
+		}
 	};
 
 	DELETE.prototype.handler = function( e, sp, newLine )
@@ -4870,6 +4979,13 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 					cur.lineEnd( true );
 					sp = cur.aPos;
 					cur.lineStart();
+				}
+				else if( this.__cMode && e.kMap( "c" ) )
+				{
+					cur.lineEnd();
+					sp = cur.aPos;
+					cur.lineStart( true );
+					this.__cMode_c = true;
 				}
 				else if( e.range )
 				{
@@ -5640,6 +5756,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	/** @type {System.Debug} */
 	var debug                                 = __import( "System.Debug" );
+	var beep = __import( "Components.Vim.Beep" );
 
 	/** @type {Components.Vim.IAction} */
 	var WORD = function( Cursor )
@@ -5666,37 +5783,87 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		var p = cur.aPos;
 
 
-		var d = 1;
-		// forward
+		// Forword WORD start
 		if( e.kMap( "w" ) || e.kMap( "W" ) )
 		{
-			if( feeder.content[ p + 1 ] == "\n" )
+			// +2 because there is a closing "\n"
+			if( feeder.content[ p + 2 ] == undefined )
 			{
-				p ++;
+				beep();
+				return;
 			}
 
 			var wordRange = analyzer.wordAt( p );
 			if( wordRange.open != -1 )
 			{
 				p = wordRange.close + 1;
+
+				while( " \t\n".indexOf( feeder.content[ p ] ) != -1 ) p ++;
+
+				if( feeder.content[ p ] == undefined )
+				{
+					// This is the last character
+					p --;
+				}
 			}
 		}
-		// Backward
+
+		// Forward WORD end
+		if( e.kMap( "e" ) || e.kMap( "E" ) )
+		{
+			if( feeder.content[ p + 2 ] == undefined )
+			{
+				beep();
+				return;
+			}
+
+			p ++;
+			while( " \t\n".indexOf( feeder.content[ p ] ) != -1 ) p ++;
+
+			// This is the last character
+			if( feeder.content[ p ] == undefined )
+			{
+				p --;
+			}
+			else
+			{
+				var wordRange = analyzer.wordAt( p );
+
+				if( wordRange.open != -1 )
+				{
+					p = wordRange.close;
+				}
+			}
+		}
+
+		// Backward WORD start
 		if( e.kMap( "b" ) || e.kMap( "B" ) )
 		{
-			if( p == 0 ) return;
-			d = -1;
-
-			var wordRange = analyzer.wordAt( p - 1 );
-			if( wordRange.open != -1 )
+			if( p == 0 )
 			{
-				p = wordRange.open;
+				beep();
+				return;
 			}
-		}
 
-		while( " \t".indexOf( feeder.content[ p ] ) != -1 )
-		{
-			p += d;
+			p --;
+			while( " \t".indexOf( feeder.content[ p ] ) != -1 ) p --;
+
+			// No more results
+			if( p == -1 )
+			{
+				p = 0;
+			}
+			else
+			{
+				var wordRange = analyzer.wordAt( p );
+				if( wordRange.open != -1 )
+				{
+					p = wordRange.open;
+				}
+
+				// If the very first char is " " or "\t"
+				if( " \t".indexOf( feeder.content[ p ] ) != -1 ) p ++;
+			}
 		}
 
 		cur.moveTo( p );
@@ -7281,7 +7448,14 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		var jumpY = expLineNum - lastLineNum;
 		var jumpX = aPos < lineStart ? lineStart - aPos : aPos - lineStart;
 
-		jumpX += Math.ceil( jumpX / pline.cols ) - 1;
+		var kX = jumpX - pline.content.length;
+		while( 0 < kX )
+		{
+			jumpX ++;
+			pline = pline.next
+			if(!( pline && pline.lineNum == expLineNum )) break;
+			kX -= pline.content.length;
+		}
 
 		if( jumpY ) this.moveY( jumpY );
 
@@ -7405,7 +7579,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 				if( s == 0 )
 				{
-					x = 1;
+					x = d;
 					if ( rline[ 0 ] == "\t" )
 					{
 						x += tabStep;
@@ -7415,14 +7589,18 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 				e += d;
 
 				var ntabs = occurence( rline.substring( s + 1, e + 1 ), "\t" );
+				if( 1 < ntabs && rline[ e ] == "\t" ) ntabs --;
 				x += ntabs * tabStep + isLF;
-				if( 1 < d ) x += d - 1;
+
+				// Reset the distance to 1 as x is now calculated
+				d = 1;
 			}
 			else // jk, non-X navigation. i.e., pX does not change
 			{
 				// s = 0, which is unused here
 				e = x + d;
 				x += ( occurence( rline.substring( 0, e ), "\t" ) ) * tabStep;
+				x += Math.floor( x / line.cols );
 				if( 1 < d ) x += d - 1;
 			}
 		}
@@ -7435,6 +7613,13 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		if( boundary )
 		{
 			x = 0 < x ? lineEnd : 0;
+
+			// This happens on backspacing max filled lines on INSERT mode
+			if( d < 0 && 0 < x )
+			{
+				boundary = false;
+				x += d;
+			}
 		}
 		else if( c == "\n" )
 		{
@@ -7654,7 +7839,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	Cursor.prototype.suppressEvent = function() { ++ this.__suppEvt; };
 	Cursor.prototype.unsuppressEvent = function() { -- this.__suppEvt; };
 
-	Cursor.prototype.getLine = function( raw )
+	Cursor.prototype.getLine = function( display )
 	{
 		var feeder = this.feeder;
 		var line = feeder.firstBuffer;
@@ -7662,7 +7847,21 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		for( var i = 0; line != eBuffer; line = line.next )
 		{
 			if( line.br ) i ++;
-			if( this.Y == i ) return line;
+			if( this.Y == i )
+			{
+				// Return the display line
+				if( display )
+				{
+					var x = this.aX + 1;
+					while( 0 < ( x -= line.content.length ) )
+					{
+						if( !line.next ) return line;
+						line = line.next;
+					}
+				}
+
+				return line;
+			}
 		}
 
 		return null;
