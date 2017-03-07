@@ -1528,7 +1528,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 	ns[ NS_EXPORT ]( EX_CLASS, "Registers", Registers );
 
 })();
-;BotanJS.define( "Components.Vim" );var VIMRE_VERSION = "1.0.1";
+;BotanJS.define( "Components.Vim" );var VIMRE_VERSION = "1.0.2";
 (function(){
 	var ns = __namespace( "Components.Vim" );
 
@@ -1573,6 +1573,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		, "E481": "No range allowed"
 		, "E492": "Not an editor command: %1"
 		, "E486": "Pattern not found: %1"
+		, "E488": "Trailing characters"
 
 		// EXtended Errors
 		, "EX1": "Pattern Error( %1 )"
@@ -2683,7 +2684,14 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		var cur = this.__cursor;
 		var Vim = cur.Vim;
 
-		if( cur.rec.changed )
+		var forceQuit = p.join( "" ).trim();
+		if( forceQuit && forceQuit[0] == "!" && 1 < forceQuit.length )
+		{
+			this.__msg = VimError( "E488" );
+			return false;
+		}
+
+		if( !forceQuit && cur.rec.changed )
 		{
 			var msg = VimError( "E37" );
 
@@ -4961,6 +4969,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 					cur.moveY( -1 );
 					cur.lineStart();
 				}
+				// Remove to Cursor jumps
 				else if( this.__startX < currAp )
 				{
 					// Swap the movement
@@ -4968,6 +4977,10 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 					// position to the earlier position
 					sp = currAp;
 					cur.moveTo( this.__startX );
+
+					// Special case for cw dn cursor jumps that
+					// does not remove the start position
+					if( e.kMap( "w" ) || e.kMap( "n" ) ) sp --;
 				}
 			}
 			// Remove the current line
@@ -6397,6 +6410,8 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		var r;
 		var Hit;
 		var FirstHit;
+
+		var l = 0;
 		var PrevStack = [];
 
 		var LoopGuard;
@@ -6420,6 +6435,7 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			}
 
 			PrevStack.push( r.index );
+			l ++;
 			LoopGuard = r.index;
 		}
 
@@ -6427,11 +6443,19 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 		if( e.kMap( "N" ) )
 		{
-			Hit = PrevStack[ PrevStack.length - 2 ];
+			// The search loop above always search for next match
+			// So use the previous match
+			Hit = PrevStack[ l - 1 ];
+
+			// Adjust if cursor is already in the previous match
+			if( Hit == p ) Hit = PrevStack[ l - 2 ];
+
 			if( Hit == undefined )
 			{
 				this.__msg = Mesg( "SEARCH_HIT_TOP" );
 
+				// This resets the exec state in previous loop
+				search = new RegExp( search );
 				while( ( r = search.exec( content ) ) !== null ) Hit = r.index;
 			}
 		}
@@ -7329,11 +7353,12 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 
 	var LineOffset = function( buffs, l )
 	{
-		/** @type {Components.Vim.LineBuffer} */
 		var offset = 0;
 
 		LineLoop:
-		for( var i = 0, line = buffs[0];
+		for( var i = 0,
+			/** @type {Components.Vim.LineBuffer} */
+			line = buffs[0];
 			line && i < l; i ++ )
 		{
 			while( line )
@@ -7446,9 +7471,21 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 		}
 
 		var jumpY = expLineNum - lastLineNum;
-		var jumpX = aPos < lineStart ? lineStart - aPos : aPos - lineStart;
+		if( jumpY )
+		{
+			this.moveY( jumpY );
 
+			// Because moveTo is a direct jump function
+			// We'll auto reveal the target line here
+			if( this.feeder.moreAt == this.Y ) this.moveY( 1 );
+		}
+
+		pline = this.getLine();
+
+		var jumpX = aPos < lineStart ? lineStart - aPos : aPos - lineStart;
 		var kX = jumpX - pline.content.length;
+
+		// This handles word-wrapped long line phantom "\n"
 		while( 0 < kX )
 		{
 			jumpX ++;
@@ -7456,8 +7493,6 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			if(!( pline && pline.lineNum == expLineNum )) break;
 			kX -= pline.content.length;
 		}
-
-		if( jumpY ) this.moveY( jumpY );
 
 		// This is needed because first line does not contain the first "\n" character
 		if( 0 < this.getLine().lineNum && lineStart <= aPos ) jumpX --;
@@ -8414,7 +8449,6 @@ window["BotanJS"]["sg"] = [ BotanJS, __namespace, __import ];
 			new EventKey( "Focus", function() { _self.__active = true; }  )
 			, new EventKey( "Blur", function() { _self.__active = false; } )
 		];
-
 
 		if( detectScreenSize )
 		{
